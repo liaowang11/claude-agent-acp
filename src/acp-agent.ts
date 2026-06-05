@@ -1093,6 +1093,14 @@ export class ClaudeAcpAgent implements Agent {
             // the SDK is talking to a model proxy that never produces
             // `content_block_delta` events for the second model call in a
             // tool-use loop).
+            //
+            // This runs for every stream_event (not gated on
+            // `parent_tool_use_id === null` like the usage block below) because
+            // subagent assistant messages flow through the same content filter.
+            // `currentStreamingMessageId` is a single field, which is safe
+            // because the SDK serializes the event stream and `message_start`
+            // always precedes its own `content_block_delta`s, so the captured
+            // id is always the parent of the deltas that follow.
             if (message.event.type === "message_start") {
               session.currentStreamingMessageId = message.event.message.id;
             } else if (
@@ -1313,7 +1321,14 @@ export class ClaudeAcpAgent implements Agent {
                       return true;
                     }
                     // Already delivered live via streaming deltas — drop the
-                    // assembled copy to avoid duplication.
+                    // assembled copy to avoid duplication. Note this is
+                    // all-or-nothing per message id: a single delta of either
+                    // kind flags the id, so if a gateway streamed (say)
+                    // thinking deltas but delivered text only in the assembled
+                    // message under that same id, the assembled text is
+                    // dropped here. That mixed mode hasn't been observed —
+                    // gateways stream either everything or nothing — and it is
+                    // not a regression (the old code dropped it unconditionally).
                     if (liveStreamed) {
                       return false;
                     }
