@@ -118,6 +118,7 @@ function mockSessionState(overrides: Record<string, any> = {}) {
     contextWindowSize: 200000,
     taskState: new Map(),
     toolUseCache: {},
+    waitingForToolCall: new Map(),
     messageIdToUuid: new Map(),
     ...overrides,
   } as any;
@@ -872,6 +873,7 @@ describe("tool conversions", () => {
         received.message.role,
         "test",
         {},
+        new Map(),
         {} as AcpClient,
         console,
       ),
@@ -1814,10 +1816,50 @@ describe("permission request cancellation", () => {
       contextWindowSize: 200000,
       taskState: new Map(),
       toolUseCache: {},
+      waitingForToolCall: new Map(),
       messageIdToUuid: new Map(),
     } as any;
     return agent.sessions[sessionId]!;
   }
+
+  it("waits for the first tool_call before requesting permission", async () => {
+    const requestPermission = vi.fn(async () => ({
+      outcome: { outcome: "selected", optionId: "allow" },
+    }));
+    const mockClient = {
+      sessionUpdate: async () => {},
+      requestPermission,
+    } as unknown as AcpClient;
+    const agent = new ClaudeAcpAgent(mockClient, { log: () => {}, error: () => {} });
+    const session = injectSession(agent, "session-1");
+
+    const pending = agent.canUseTool("session-1")("Bash", { command: "echo hello" }, {
+      signal: new AbortController().signal,
+      suggestions: [],
+      toolUseID: "tool-1",
+    } as any);
+
+    await Promise.resolve();
+    expect(requestPermission).not.toHaveBeenCalled();
+    expect(session.waitingForToolCall.has("tool-1")).toBe(true);
+
+    const notifications = toAcpNotifications(
+      [{ type: "tool_use", id: "tool-1", name: "Bash", input: { command: "echo hello" } }],
+      "assistant",
+      "session-1",
+      session.toolUseCache,
+      session.waitingForToolCall,
+      mockClient,
+      console,
+    );
+
+    expect(notifications[0].update.sessionUpdate).toBe("tool_call");
+    expect(requestPermission).not.toHaveBeenCalled();
+
+    await expect(pending).resolves.toMatchObject({ behavior: "allow" });
+    expect(requestPermission).toHaveBeenCalledTimes(1);
+    expect(session.waitingForToolCall.has("tool-1")).toBe(false);
+  });
 
   it("forwards the tool-call signal so a pending permission request is cancelled on abort", async () => {
     let receivedSignal: AbortSignal | undefined;
@@ -1835,7 +1877,13 @@ describe("permission request cancellation", () => {
       },
     } as unknown as AcpClient;
     const agent = new ClaudeAcpAgent(mockClient, { log: () => {}, error: () => {} });
-    injectSession(agent, "session-1");
+    const session = injectSession(agent, "session-1");
+    session.toolUseCache["tool-1"] = {
+      type: "tool_use",
+      id: "tool-1",
+      name: "Bash",
+      input: { command: "ls" },
+    };
 
     const controller = new AbortController();
     const pending = agent.canUseTool("session-1")("Bash", { command: "ls" }, {
@@ -1860,7 +1908,13 @@ describe("permission request cancellation", () => {
       requestPermission: async () => ({ outcome: { outcome: "cancelled" } }),
     } as unknown as AcpClient;
     const agent = new ClaudeAcpAgent(mockClient, { log: () => {}, error: () => {} });
-    injectSession(agent, "session-1");
+    const session = injectSession(agent, "session-1");
+    session.toolUseCache["tool-1"] = {
+      type: "tool_use",
+      id: "tool-1",
+      name: "Bash",
+      input: { command: "ls" },
+    };
 
     await expect(
       agent.canUseTool("session-1")("Bash", { command: "ls" }, {
@@ -2564,6 +2618,7 @@ describe("session/close", () => {
       contextWindowSize: 200000,
       taskState: new Map(),
       toolUseCache: {},
+      waitingForToolCall: new Map(),
       messageIdToUuid: new Map(),
     };
     return agent.sessions[sessionId]!;
@@ -2649,6 +2704,7 @@ describe("session/delete", () => {
       contextWindowSize: 200000,
       taskState: new Map(),
       toolUseCache: {},
+      waitingForToolCall: new Map(),
       messageIdToUuid: new Map(),
     };
     return agent.sessions[sessionId]!;
@@ -2751,6 +2807,7 @@ describe("getOrCreateSession param change detection", () => {
       contextWindowSize: 200000,
       taskState: new Map(),
       toolUseCache: {},
+      waitingForToolCall: new Map(),
       messageIdToUuid: new Map(),
     };
     return agent.sessions[sessionId]!;
@@ -4965,6 +5022,7 @@ describe("post-error recovery", () => {
       contextWindowSize: 200000,
       taskState: new Map(),
       toolUseCache: {},
+      waitingForToolCall: new Map(),
       messageIdToUuid: new Map(),
     };
     return { interrupt };
@@ -5535,6 +5593,7 @@ describe("session/cancel wedge recovery (issue #680)", () => {
       contextWindowSize: 200000,
       taskState: new Map(),
       toolUseCache: {},
+      waitingForToolCall: new Map(),
       messageIdToUuid: new Map(),
     };
     return { interrupt };
@@ -5666,9 +5725,8 @@ describe("streamEventToAcpNotifications", () => {
       pingMessage,
       "test-session",
       {},
-      { sessionUpdate: async () => {} } as unknown as Parameters<
-        typeof streamEventToAcpNotifications
-      >[3],
+      new Map(),
+      { sessionUpdate: async () => {} } as unknown as AcpClient,
       logger,
     );
 
@@ -5690,9 +5748,17 @@ describe("streamEventToAcpNotifications", () => {
       },
     } as Parameters<typeof streamEventToAcpNotifications>[0];
 
-    const result = streamEventToAcpNotifications(message, "test", {}, {} as AcpClient, console, {
-      messageId,
-    });
+    const result = streamEventToAcpNotifications(
+      message,
+      "test",
+      {},
+      new Map(),
+      {} as AcpClient,
+      console,
+      {
+        messageId,
+      },
+    );
 
     expect(result).toEqual([
       {
@@ -5716,6 +5782,7 @@ describe("toAcpNotifications messageId", () => {
       "assistant",
       "test",
       {},
+      new Map(),
       {} as AcpClient,
       console,
       { messageId },
@@ -5739,6 +5806,7 @@ describe("toAcpNotifications messageId", () => {
       "user",
       "test",
       {},
+      new Map(),
       {} as AcpClient,
       console,
       { messageId },
@@ -5753,6 +5821,7 @@ describe("toAcpNotifications messageId", () => {
       "assistant",
       "test",
       {},
+      new Map(),
       {} as AcpClient,
       console,
       { messageId },
@@ -5764,7 +5833,15 @@ describe("toAcpNotifications messageId", () => {
   });
 
   it("omits messageId when none is supplied", () => {
-    const result = toAcpNotifications("hello", "assistant", "test", {}, {} as AcpClient, console);
+    const result = toAcpNotifications(
+      "hello",
+      "assistant",
+      "test",
+      {},
+      new Map(),
+      {} as AcpClient,
+      console,
+    );
     expect(result[0].update).not.toHaveProperty("messageId");
   });
 
@@ -5781,6 +5858,7 @@ describe("toAcpNotifications messageId", () => {
       "assistant",
       "test",
       {},
+      new Map(),
       {} as AcpClient,
       console,
       { messageId, registerHooks: false },
@@ -5797,6 +5875,7 @@ describe("toAcpNotifications thinking chunks", () => {
       "assistant",
       "test",
       {},
+      new Map(),
       {} as AcpClient,
       console,
     );
@@ -5818,6 +5897,7 @@ describe("toAcpNotifications thinking chunks", () => {
       "assistant",
       "test",
       {},
+      new Map(),
       {} as AcpClient,
       console,
     );
@@ -5831,6 +5911,7 @@ describe("toAcpNotifications thinking chunks", () => {
       "assistant",
       "test",
       {},
+      new Map(),
       {} as AcpClient,
       console,
     );
@@ -5988,6 +6069,7 @@ describe("agent selection config option", () => {
         contextWindowSize: 200000,
         taskState: new Map(),
         toolUseCache: {},
+        waitingForToolCall: new Map(),
         messageIdToUuid: new Map(),
       };
       return { session: agent.sessions[sessionId]!, applyFlagSettings };

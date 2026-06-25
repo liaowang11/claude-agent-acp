@@ -275,6 +275,11 @@ type Session = {
    *  `tool_result` time so a long-running session doesn't accumulate every
    *  tool call for its whole lifetime. */
   toolUseCache: ToolUseCache;
+  /**
+   * This lets canUseTool wait for the first tool call message from the SDK
+   * to ensure it emits a tool_call_update only after the first tool_call message.
+   */
+  waitingForToolCall: WaitingForToolCall;
   /** Maps the ACP `messageId` we expose to clients (see `messageIdForGrouping`)
    *  to the SDK message uuid that the Agent SDK's rewind/resume APIs key on
    *  (`Query.rewindFiles` takes a user-message uuid; `resumeSessionAt` takes an
@@ -388,6 +393,8 @@ export type ToolUpdateMeta = {
     signal: string | null;
   };
 };
+
+export type WaitingForToolCall = Map<string, () => void>;
 
 export type ToolUseCache = {
   [key: string]: {
@@ -1689,6 +1696,7 @@ export class ClaudeAcpAgent {
                     "assistant",
                     params.sessionId,
                     session.toolUseCache,
+                    session.waitingForToolCall,
                     this.client,
                     this.logger,
                   )) {
@@ -1859,6 +1867,7 @@ export class ClaudeAcpAgent {
               message,
               params.sessionId,
               session.toolUseCache,
+              session.waitingForToolCall,
               this.client,
               this.logger,
               {
@@ -1959,6 +1968,7 @@ export class ClaudeAcpAgent {
                   message.message.role,
                   params.sessionId,
                   session.toolUseCache,
+                  session.waitingForToolCall,
                   this.client,
                   this.logger,
                   {
@@ -2089,6 +2099,7 @@ export class ClaudeAcpAgent {
               message.message.role,
               params.sessionId,
               session.toolUseCache,
+              session.waitingForToolCall,
               this.client,
               this.logger,
               {
@@ -2456,6 +2467,7 @@ export class ClaudeAcpAgent {
 
   private async replaySessionHistory(sessionId: string): Promise<void> {
     const toolUseCache: ToolUseCache = {};
+    const waitingForToolCall: WaitingForToolCall = new Map();
     const messages = await getSessionMessages(sessionId);
 
     for (const message of messages) {
@@ -2484,6 +2496,7 @@ export class ClaudeAcpAgent {
         message.message.role,
         sessionId,
         toolUseCache,
+        waitingForToolCall,
         this.client,
         this.logger,
         {
@@ -2532,8 +2545,6 @@ export class ClaudeAcpAgent {
 
   canUseTool(sessionId: string): CanUseTool {
     return async (toolName, toolInput, { signal, suggestions, toolUseID }) => {
-      const alwaysAllowLabel = describeAlwaysAllow(suggestions, toolName);
-      const supportsTerminalOutput = this.clientCapabilities?._meta?.["terminal_output"] === true;
       const session = this.sessions[sessionId];
       if (!session) {
         return {
@@ -2541,6 +2552,13 @@ export class ClaudeAcpAgent {
           message: "Session not found",
         };
       }
+      if (!session.toolUseCache[toolUseID]) {
+        const { promise, resolve } = Promise.withResolvers<void>();
+        session.waitingForToolCall.set(toolUseID, resolve);
+        await promise;
+      }
+      const alwaysAllowLabel = describeAlwaysAllow(suggestions, toolName);
+      const supportsTerminalOutput = this.clientCapabilities?._meta?.["terminal_output"] === true;
 
       // AskUserQuestion is surfaced to us as a normal permission check (the SDK
       // routes it through canUseTool whenever a callback is registered, rather
@@ -3401,6 +3419,7 @@ export class ClaudeAcpAgent {
         ) ?? DEFAULT_CONTEXT_WINDOW,
       taskState,
       toolUseCache: {},
+      waitingForToolCall: new Map(),
       messageIdToUuid: new Map(),
     };
 
@@ -4126,6 +4145,7 @@ export function toAcpNotifications(
   role: "assistant" | "user",
   sessionId: string,
   toolUseCache: ToolUseCache,
+  waitingForToolCall: WaitingForToolCall,
   client: AcpClient,
   logger: Logger,
   options?: {
@@ -4295,6 +4315,13 @@ export function toAcpNotifications(
               ...toolInfoFromToolUse(chunk, supportsTerminalOutput, options?.cwd),
             };
           } else {
+            if (waitingForToolCall.has(chunk.id)) {
+              // If a canUseTool is waiting for the first tool_use chunk,
+              // we can resolve it now.
+              const resolve = waitingForToolCall.get(chunk.id)!;
+              resolve();
+              waitingForToolCall.delete(chunk.id);
+            }
             // First encounter (streaming content_block_start or replay) —
             // send as tool_call with terminal_info for Bash tools.
             update = {
@@ -4452,6 +4479,7 @@ export function streamEventToAcpNotifications(
   message: SDKPartialAssistantMessage,
   sessionId: string,
   toolUseCache: ToolUseCache,
+  waitingForToolCall: WaitingForToolCall,
   client: AcpClient,
   logger: Logger,
   options?: {
@@ -4469,6 +4497,7 @@ export function streamEventToAcpNotifications(
         "assistant",
         sessionId,
         toolUseCache,
+        waitingForToolCall,
         client,
         logger,
         {
@@ -4485,6 +4514,7 @@ export function streamEventToAcpNotifications(
         "assistant",
         sessionId,
         toolUseCache,
+        waitingForToolCall,
         client,
         logger,
         {

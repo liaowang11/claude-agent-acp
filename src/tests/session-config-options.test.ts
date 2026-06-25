@@ -124,6 +124,8 @@ describe("session config options", () => {
       ),
       configOptions: structuredClone(MOCK_CONFIG_OPTIONS),
       contextWindowSize: 200000,
+      toolUseCache: {},
+      waitingForToolCall: new Map(),
     };
   }
 
@@ -1112,6 +1114,12 @@ describe("session config options", () => {
           { id: "dontAsk", name: "Don't Ask", description: "Deny if not pre-approved" },
         ],
       };
+      session.toolUseCache["toolu_1"] = {
+        type: "tool_use",
+        id: "toolu_1",
+        name: "ExitPlanMode",
+        input: { plan: "do stuff" },
+      };
 
       const canUseTool = (agent as any).canUseTool(SESSION_ID);
       const signal = new AbortController().signal;
@@ -1144,6 +1152,12 @@ describe("session config options", () => {
         ],
       };
       permissionResponse = { outcome: { outcome: "selected", optionId: "auto" } };
+      session.toolUseCache["toolu_2"] = {
+        type: "tool_use",
+        id: "toolu_2",
+        name: "ExitPlanMode",
+        input: { plan: "do stuff" },
+      };
 
       const canUseTool = (agent as any).canUseTool(SESSION_ID);
       const result = await canUseTool(
@@ -1170,6 +1184,12 @@ describe("session config options", () => {
           { id: "plan", name: "Plan Mode", description: "Planning mode" },
           { id: "dontAsk", name: "Don't Ask", description: "Deny if not pre-approved" },
         ],
+      };
+      session.toolUseCache["toolu_3"] = {
+        type: "tool_use",
+        id: "toolu_3",
+        name: "ExitPlanMode",
+        input: { plan: "do stuff" },
       };
 
       const canUseTool = (agent as any).canUseTool(SESSION_ID);

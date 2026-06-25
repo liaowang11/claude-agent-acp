@@ -10,7 +10,13 @@ import {
   BetaBashCodeExecutionResultBlock,
   BetaBashCodeExecutionToolResultBlockParam,
 } from "@anthropic-ai/sdk/resources/beta.mjs";
-import { AcpClient, toAcpNotifications, ToolUseCache, Logger } from "../acp-agent.js";
+import {
+  AcpClient,
+  toAcpNotifications,
+  ToolUseCache,
+  Logger,
+  WaitingForToolCall,
+} from "../acp-agent.js";
 import {
   toolUpdateFromToolResult,
   createPostToolUseHook,
@@ -37,6 +43,7 @@ describe("rawOutput in tool call updates", () => {
         input: { command: "echo hello" },
       },
     };
+    const waitingForToolCall: WaitingForToolCall = new Map();
 
     const toolResult: ToolResultBlockParam = {
       type: "tool_result",
@@ -50,6 +57,7 @@ describe("rawOutput in tool call updates", () => {
       "assistant",
       "test-session",
       toolUseCache,
+      waitingForToolCall,
       mockClient,
       mockLogger,
     );
@@ -72,6 +80,7 @@ describe("rawOutput in tool call updates", () => {
         input: { file_path: "/test/file.txt" },
       },
     };
+    const waitingForToolCall: WaitingForToolCall = new Map();
 
     // ToolResultBlockParam content can be string or array of TextBlockParam
     const toolResult: ToolResultBlockParam = {
@@ -86,6 +95,7 @@ describe("rawOutput in tool call updates", () => {
       "assistant",
       "test-session",
       toolUseCache,
+      waitingForToolCall,
       mockClient,
       mockLogger,
     );
@@ -108,6 +118,7 @@ describe("rawOutput in tool call updates", () => {
         input: { query: "test" },
       },
     };
+    const waitingForToolCall: WaitingForToolCall = new Map();
 
     // BetaMCPToolResultBlock content can be string or Array<BetaTextBlock>
     const toolResult: BetaMCPToolResultBlock = {
@@ -122,6 +133,7 @@ describe("rawOutput in tool call updates", () => {
       "assistant",
       "test-session",
       toolUseCache,
+      waitingForToolCall,
       mockClient,
       mockLogger,
     );
@@ -144,6 +156,7 @@ describe("rawOutput in tool call updates", () => {
         input: { term: "test" },
       },
     };
+    const waitingForToolCall: WaitingForToolCall = new Map();
 
     // BetaTextBlock requires citations field
     const arrayContent: BetaTextBlock[] = [
@@ -163,6 +176,7 @@ describe("rawOutput in tool call updates", () => {
       "assistant",
       "test-session",
       toolUseCache,
+      waitingForToolCall,
       mockClient,
       mockLogger,
     );
@@ -185,6 +199,7 @@ describe("rawOutput in tool call updates", () => {
         input: { query: "test search" },
       },
     };
+    const waitingForToolCall: WaitingForToolCall = new Map();
 
     // BetaWebSearchResultBlock from SDK
     const searchResults: BetaWebSearchResultBlock[] = [
@@ -208,6 +223,7 @@ describe("rawOutput in tool call updates", () => {
       "assistant",
       "test-session",
       toolUseCache,
+      waitingForToolCall,
       mockClient,
       mockLogger,
     );
@@ -230,6 +246,7 @@ describe("rawOutput in tool call updates", () => {
         input: { command: "ls -la" },
       },
     };
+    const waitingForToolCall: WaitingForToolCall = new Map();
 
     // BetaBashCodeExecutionResultBlock from SDK
     const bashResult: BetaBashCodeExecutionResultBlock = {
@@ -251,6 +268,7 @@ describe("rawOutput in tool call updates", () => {
       "assistant",
       "test-session",
       toolUseCache,
+      waitingForToolCall,
       mockClient,
       mockLogger,
     );
@@ -273,6 +291,7 @@ describe("rawOutput in tool call updates", () => {
         input: { command: "invalid_command" },
       },
     };
+    const waitingForToolCall: WaitingForToolCall = new Map();
 
     const toolResult: ToolResultBlockParam = {
       type: "tool_result",
@@ -286,6 +305,7 @@ describe("rawOutput in tool call updates", () => {
       "assistant",
       "test-session",
       toolUseCache,
+      waitingForToolCall,
       mockClient,
       mockLogger,
     );
@@ -308,6 +328,7 @@ describe("rawOutput in tool call updates", () => {
         input: { todos: [{ content: "Test task", status: "pending" }] },
       },
     };
+    const waitingForToolCall: WaitingForToolCall = new Map();
 
     const toolResult: ToolResultBlockParam = {
       type: "tool_result",
@@ -321,6 +342,7 @@ describe("rawOutput in tool call updates", () => {
       "assistant",
       "test-session",
       toolUseCache,
+      waitingForToolCall,
       mockClient,
       mockLogger,
     );
@@ -351,11 +373,14 @@ describe("rawOutput in tool call updates", () => {
       is_error: false,
     };
 
+    const waitingForToolCall: WaitingForToolCall = new Map();
+
     const notifications = toAcpNotifications(
       [toolResult],
       "assistant",
       "test-session",
       toolUseCache,
+      waitingForToolCall,
       mockClient,
       mockLogger,
     );
@@ -383,6 +408,7 @@ describe("rawOutput in tool call updates", () => {
         input: { file_path: "/test/image.png" },
       },
     };
+    const waitingForToolCall: WaitingForToolCall = new Map();
 
     const imageBlock: ImageBlockParam = {
       type: "image",
@@ -401,6 +427,7 @@ describe("rawOutput in tool call updates", () => {
       "assistant",
       "test-session",
       toolUseCache,
+      waitingForToolCall,
       mockClient,
       mockLogger,
     );
@@ -779,6 +806,7 @@ describe("Bash terminal output", () => {
     // Reset before each test: toAcpNotifications prunes the cache entry once it
     // maps the tool_result, so a shared object would be empty by the 2nd test.
     let toolUseCache: ToolUseCache;
+    const waitingForToolCall: WaitingForToolCall = new Map();
     beforeEach(() => {
       toolUseCache = {
         toolu_bash: {
@@ -814,6 +842,7 @@ describe("Bash terminal output", () => {
         "assistant",
         "test-session",
         toolUseCache,
+        waitingForToolCall,
         mockClient,
         mockLogger,
         { clientCapabilities },
@@ -854,6 +883,7 @@ describe("Bash terminal output", () => {
         "assistant",
         "test-session",
         toolUseCache,
+        waitingForToolCall,
         mockClient,
         mockLogger,
       );
@@ -880,6 +910,7 @@ describe("Bash terminal output", () => {
         "assistant",
         "test-session",
         toolUseCache,
+        waitingForToolCall,
         mockClient,
         mockLogger,
         { clientCapabilities },
@@ -895,6 +926,7 @@ describe("Bash terminal output", () => {
         "assistant",
         "test-session",
         toolUseCache,
+        waitingForToolCall,
         mockClient,
         mockLogger,
         { clientCapabilities: { _meta: { terminal_output: true } } },
@@ -915,6 +947,7 @@ describe("Bash terminal output", () => {
         "assistant",
         "test-session",
         toolUseCacheWithoutSupport,
+        waitingForToolCall,
         mockClient,
         mockLogger,
       );
@@ -947,6 +980,7 @@ describe("Bash terminal output", () => {
         "assistant",
         "test-session",
         toolUseCache,
+        waitingForToolCall,
         mockClient,
         mockLogger,
         { clientCapabilities },
@@ -969,6 +1003,7 @@ describe("Bash terminal output", () => {
   describe("toolUseCache pruning", () => {
     it("retains the tool_use entry until its result, then prunes it", () => {
       const toolUseCache: ToolUseCache = {};
+      const waitingForToolCall: WaitingForToolCall = new Map();
       const toolUse = {
         type: "tool_use" as const,
         id: "toolu_read",
@@ -977,7 +1012,15 @@ describe("Bash terminal output", () => {
       };
 
       // tool_use is cached and kept (the matching result hasn't arrived yet).
-      toAcpNotifications([toolUse], "assistant", "s", toolUseCache, mockClient, mockLogger);
+      toAcpNotifications(
+        [toolUse],
+        "assistant",
+        "s",
+        toolUseCache,
+        waitingForToolCall,
+        mockClient,
+        mockLogger,
+      );
       expect(toolUseCache.toolu_read).toBeDefined();
 
       // tool_result resolves it, so the entry is pruned to bound memory.
@@ -986,7 +1029,15 @@ describe("Bash terminal output", () => {
         tool_use_id: "toolu_read",
         content: [{ type: "text", text: "hello" }],
       };
-      toAcpNotifications([toolResult], "assistant", "s", toolUseCache, mockClient, mockLogger);
+      toAcpNotifications(
+        [toolResult],
+        "assistant",
+        "s",
+        toolUseCache,
+        waitingForToolCall,
+        mockClient,
+        mockLogger,
+      );
       expect(toolUseCache.toolu_read).toBeUndefined();
     });
   });
@@ -994,6 +1045,7 @@ describe("Bash terminal output", () => {
   describe("post-tool-use hook sends diff content for Edit tool", () => {
     it("should include content and locations from structuredPatch in hook update", async () => {
       const toolUseCache: ToolUseCache = {};
+      const waitingForToolCall: WaitingForToolCall = new Map();
 
       const hookUpdates: any[] = [];
       const mockClientWithUpdate = {
@@ -1019,6 +1071,7 @@ describe("Bash terminal output", () => {
         "assistant",
         "test-session",
         toolUseCache,
+        waitingForToolCall,
         mockClientWithUpdate,
         mockLogger,
       );
@@ -1073,6 +1126,7 @@ describe("Bash terminal output", () => {
 
     it("should include multiple diff blocks for replaceAll with multiple hunks", async () => {
       const toolUseCache: ToolUseCache = {};
+      const waitingForToolCall: WaitingForToolCall = new Map();
 
       const hookUpdates: any[] = [];
       const mockClientWithUpdate = {
@@ -1098,6 +1152,7 @@ describe("Bash terminal output", () => {
         "assistant",
         "test-session",
         toolUseCache,
+        waitingForToolCall,
         mockClientWithUpdate,
         mockLogger,
       );
@@ -1158,6 +1213,7 @@ describe("Bash terminal output", () => {
 
     it("should not include content/locations for non-Edit tools", async () => {
       const toolUseCache: ToolUseCache = {};
+      const waitingForToolCall: WaitingForToolCall = new Map();
 
       const hookUpdates: any[] = [];
       const mockClientWithUpdate = {
@@ -1178,6 +1234,7 @@ describe("Bash terminal output", () => {
         "assistant",
         "test-session",
         toolUseCache,
+        waitingForToolCall,
         mockClientWithUpdate,
         mockLogger,
       );
@@ -1213,6 +1270,7 @@ describe("Bash terminal output", () => {
     // tool_use time and was never corrected after the tool ran.
     it("should emit a real diff for Write of an existing file (type: update)", async () => {
       const toolUseCache: ToolUseCache = {};
+      const waitingForToolCall: WaitingForToolCall = new Map();
       const hookUpdates: any[] = [];
       const mockClientWithUpdate = {
         sessionUpdate: async (notification: any) => {
@@ -1235,6 +1293,7 @@ describe("Bash terminal output", () => {
         "assistant",
         "test-session",
         toolUseCache,
+        waitingForToolCall,
         mockClientWithUpdate,
         mockLogger,
       );
@@ -1289,6 +1348,7 @@ describe("Bash terminal output", () => {
 
     it("should still emit a sensible diff for Write of a brand-new file (type: create)", async () => {
       const toolUseCache: ToolUseCache = {};
+      const waitingForToolCall: WaitingForToolCall = new Map();
       const hookUpdates: any[] = [];
       const mockClientWithUpdate = {
         sessionUpdate: async (notification: any) => {
@@ -1311,6 +1371,7 @@ describe("Bash terminal output", () => {
         "assistant",
         "test-session",
         toolUseCache,
+        waitingForToolCall,
         mockClientWithUpdate,
         mockLogger,
       );
@@ -1368,6 +1429,7 @@ describe("Bash terminal output", () => {
       };
 
       const toolUseCache: ToolUseCache = {};
+      const waitingForToolCall: WaitingForToolCall = new Map();
 
       // Capture session updates sent by the hook callback
       const hookUpdates: any[] = [];
@@ -1389,6 +1451,7 @@ describe("Bash terminal output", () => {
         "assistant",
         "test-session",
         toolUseCache,
+        waitingForToolCall,
         mockClientWithUpdate,
         mockLogger,
         { clientCapabilities },
@@ -1418,6 +1481,7 @@ describe("Bash terminal output", () => {
         "assistant",
         "test-session",
         toolUseCache,
+        waitingForToolCall,
         mockClientWithUpdate,
         mockLogger,
         { clientCapabilities },
@@ -1469,6 +1533,7 @@ describe("Bash terminal output", () => {
 
     it("should not include terminal _meta in hook update when client lacks terminal_output support", async () => {
       const toolUseCache: ToolUseCache = {};
+      const waitingForToolCall: WaitingForToolCall = new Map();
 
       const hookUpdates: any[] = [];
       const mockClientWithUpdate = {
@@ -1490,6 +1555,7 @@ describe("Bash terminal output", () => {
         "assistant",
         "test-session",
         toolUseCache,
+        waitingForToolCall,
         mockClientWithUpdate,
         mockLogger,
         // No clientCapabilities — terminal_output not supported
@@ -1514,6 +1580,7 @@ describe("Bash terminal output", () => {
         "assistant",
         "test-session",
         toolUseCache,
+        waitingForToolCall,
         mockClientWithUpdate,
         mockLogger,
       );
@@ -1645,6 +1712,7 @@ describe("toAcpNotifications - TodoWrite with undefined input regression", () =>
 
   it("should not throw when TodoWrite tool_use has undefined input", () => {
     const toolUseCache: ToolUseCache = {};
+    const waitingForToolCall: WaitingForToolCall = new Map();
 
     const notifications = toAcpNotifications(
       [
@@ -1658,6 +1726,7 @@ describe("toAcpNotifications - TodoWrite with undefined input regression", () =>
       "assistant",
       "test-session",
       toolUseCache,
+      waitingForToolCall,
       mockClient,
       mockLogger,
     );
@@ -1669,6 +1738,7 @@ describe("toAcpNotifications - TodoWrite with undefined input regression", () =>
 
   it("should still emit plan update when TodoWrite has valid input", () => {
     const toolUseCache: ToolUseCache = {};
+    const waitingForToolCall: WaitingForToolCall = new Map();
 
     const notifications = toAcpNotifications(
       [
@@ -1682,6 +1752,7 @@ describe("toAcpNotifications - TodoWrite with undefined input regression", () =>
       "assistant",
       "test-session",
       toolUseCache,
+      waitingForToolCall,
       mockClient,
       mockLogger,
     );
@@ -1780,6 +1851,7 @@ describe("toAcpNotifications - Task* tools", () => {
 
   it("suppresses tool_call for TaskCreate/TaskUpdate/TaskList/TaskGet on tool_use", () => {
     const toolUseCache: ToolUseCache = {};
+    const waitingForToolCall: WaitingForToolCall = new Map();
     const taskState: TaskState = new Map();
 
     const notifications = toAcpNotifications(
@@ -1797,6 +1869,7 @@ describe("toAcpNotifications - Task* tools", () => {
       "assistant",
       "test-session",
       toolUseCache,
+      waitingForToolCall,
       mockClient,
       mockLogger,
       { taskState },
@@ -1808,6 +1881,7 @@ describe("toAcpNotifications - Task* tools", () => {
 
   it("emits a plan snapshot after a TaskCreate tool_result and accumulates state", () => {
     const toolUseCache: ToolUseCache = {};
+    const waitingForToolCall: WaitingForToolCall = new Map();
     const taskState: TaskState = new Map();
 
     toAcpNotifications(
@@ -1822,6 +1896,7 @@ describe("toAcpNotifications - Task* tools", () => {
       "assistant",
       "test-session",
       toolUseCache,
+      waitingForToolCall,
       mockClient,
       mockLogger,
       { taskState },
@@ -1839,6 +1914,7 @@ describe("toAcpNotifications - Task* tools", () => {
       "user",
       "test-session",
       toolUseCache,
+      waitingForToolCall,
       mockClient,
       mockLogger,
       { taskState },
@@ -1863,6 +1939,7 @@ describe("toAcpNotifications - Task* tools", () => {
       "assistant",
       "test-session",
       toolUseCache,
+      waitingForToolCall,
       mockClient,
       mockLogger,
       { taskState },
@@ -1880,6 +1957,7 @@ describe("toAcpNotifications - Task* tools", () => {
       "user",
       "test-session",
       toolUseCache,
+      waitingForToolCall,
       mockClient,
       mockLogger,
       { taskState },
@@ -1896,6 +1974,7 @@ describe("toAcpNotifications - Task* tools", () => {
 
   it("emits a plan snapshot reflecting status changes after a TaskUpdate tool_result", () => {
     const toolUseCache: ToolUseCache = {};
+    const waitingForToolCall: WaitingForToolCall = new Map();
     const taskState: TaskState = new Map([["1", { subject: "First", status: "pending" as const }]]);
     toolUseCache["update-1"] = {
       type: "tool_use",
@@ -1920,6 +1999,7 @@ describe("toAcpNotifications - Task* tools", () => {
       "user",
       "test-session",
       toolUseCache,
+      waitingForToolCall,
       mockClient,
       mockLogger,
       { taskState },
@@ -1937,6 +2017,7 @@ describe("toAcpNotifications - Task* tools", () => {
       "list-1": { type: "tool_use", id: "list-1", name: "TaskList", input: {} },
       "get-1": { type: "tool_use", id: "get-1", name: "TaskGet", input: { taskId: "1" } },
     };
+    const waitingForToolCall: WaitingForToolCall = new Map();
     const taskState: TaskState = new Map([
       ["1", { subject: "Existing", status: "in_progress" as const }],
     ]);
@@ -1949,6 +2030,7 @@ describe("toAcpNotifications - Task* tools", () => {
       "user",
       "test-session",
       toolUseCache,
+      waitingForToolCall,
       mockClient,
       mockLogger,
       { taskState },
@@ -1967,6 +2049,7 @@ describe("toAcpNotifications - Task* tools", () => {
         input: { subject: "A", description: "" },
       },
     };
+    const waitingForToolCall: WaitingForToolCall = new Map();
     const taskState: TaskState = new Map();
 
     const notifications = toAcpNotifications(
@@ -1981,6 +2064,7 @@ describe("toAcpNotifications - Task* tools", () => {
       "user",
       "test-session",
       toolUseCache,
+      waitingForToolCall,
       mockClient,
       mockLogger,
       { taskState },
