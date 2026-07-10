@@ -142,6 +142,17 @@ function sanitizeTitle(text: string): string {
   return sanitized.slice(0, MAX_TITLE_LENGTH - 1) + "…";
 }
 
+/** `generateSessionTitle` exists on the SDK's query object but is not part of
+ *  the exported `Query` type. It asks the running agent to summarize the
+ *  conversation into a short title — the same generation the interactive CLI
+ *  runs in the background — and with `persist: true` writes it to the session
+ *  file so it also surfaces through `getSessionInfo`/`listSessions`. Narrowed
+ *  here (rather than cast to `any`) so the call site stays type-checked, and
+ *  probed with a `typeof` guard so an SDK without it degrades gracefully. */
+type TitleGeneratingQuery = {
+  generateSessionTitle(description: string, options?: { persist?: boolean }): Promise<string>;
+};
+
 /**
  * Logger interface for customizing logging output
  */
@@ -483,11 +494,18 @@ type Session = {
    *  per-session, so this state must not be shared across sessions. */
   taskState: TaskState;
   /** Last session title we pushed to the client via `session_info_update`.
-   *  The SDK auto-generates a title in a background task and persists it to the
-   *  session file; we poll it on each turn-end (`session_state_changed: idle`)
-   *  and only notify the client when it actually changes. Undefined until the
-   *  first title is observed. */
+   *  On the first completed turn we ask the SDK to generate a title (see
+   *  `titleGenerationRequested`), which persists it to the session file; we read
+   *  it back on each turn-end (`session_state_changed: idle`) and only notify the
+   *  client when it actually changes. Undefined until the first title is
+   *  observed. */
   lastTitle?: string;
+  /** Whether we've asked the SDK to generate a title for this session yet.
+   *  Headless `query()` does not auto-generate one the way the interactive CLI
+   *  does, so without this trigger `getSessionInfo`'s summary falls back to the
+   *  last user prompt. Set once on the first turn-end (request-once: not retried
+   *  on failure, so a transient error can't make us regenerate every turn). */
+  titleGenerationRequested?: boolean;
   /** Caches `tool_use` blocks by id so the matching `tool_result` can recover
    *  the tool name/input when mapping it to a `tool_call_update`. Per-session
    *  (tool_use ids are only unique within a session) and pruned at
@@ -1522,11 +1540,18 @@ export class ClaudeAcpAgent {
     };
   }
 
-  /** Read the SDK-maintained title for a session and, if it changed since the
-   *  last time we looked, notify the client with a `session_info_update`. The
-   *  SDK has no push event for the title it auto-generates in the background, so
-   *  we pull it at turn-end. A missing session file or read error is non-fatal:
-   *  the title is best-effort and another turn will retry. */
+  /** At turn-end, make sure the client has a meaningful session title.
+   *
+   *  Headless `query()` does not auto-generate a title the way the interactive
+   *  CLI does, so the SDK summary otherwise falls back to the last user prompt.
+   *  On the first completed turn we ask the SDK to generate one, seeded from the
+   *  session's first prompt — the SDK's generator returns null for an empty
+   *  description and does NOT derive from the conversation itself, so we must
+   *  pass real seed text. Generation happens once per session (never per turn);
+   *  `persist: true` records it so `listSessions`/resume see it too. A user
+   *  `/rename` (`customTitle`) always wins and suppresses generation. We push a
+   *  `session_info_update` only when the title actually changes. A missing
+   *  session file, read error, or generation failure is non-fatal. */
   private async maybeUpdateSessionTitle(sessionId: string, session: Session): Promise<void> {
     let info;
     try {
@@ -1535,9 +1560,28 @@ export class ClaudeAcpAgent {
       this.logger.error(`Session ${sessionId}: failed to read session info: ${error}`);
       return;
     }
-    // `customTitle` is a user-set `/rename`; `summary` is the auto-generated
-    // title (or first prompt). Prefer the explicit title when present.
-    const rawTitle = info?.customTitle ?? info?.summary;
+
+    // A user-set `/rename` always wins.
+    let rawTitle = info?.customTitle;
+
+    // Otherwise generate an AI title once, seeded from the first prompt. Gated
+    // by `titleGenerationRequested` so it never fires per turn.
+    if (!rawTitle && !session.titleGenerationRequested) {
+      const seed = info?.firstPrompt?.trim();
+      const generate = (session.query as Partial<TitleGeneratingQuery>).generateSessionTitle;
+      if (seed && typeof generate === "function") {
+        session.titleGenerationRequested = true;
+        try {
+          rawTitle = (await generate.call(session.query, seed, { persist: true })) || undefined;
+        } catch (error) {
+          this.logger.error(`Session ${sessionId}: failed to generate session title: ${error}`);
+        }
+      }
+    }
+
+    // Fall back to the SDK summary: the persisted AI title on a resumed session,
+    // otherwise the last prompt.
+    rawTitle ??= info?.summary;
     if (!rawTitle) {
       return;
     }
@@ -2643,10 +2687,8 @@ export class ClaudeAcpAgent {
                       ),
                     );
                   }
-                  // The SDK generates the session title in a background task and
-                  // persists it to the session file; `idle` is the turn-over
-                  // signal, so it's the point at which a new title may have
-                  // landed. Push it to the client if it changed.
+                  // `idle` is the turn-over signal: generate the title (once) and
+                  // push it to the client if it changed.
                   await this.maybeUpdateSessionTitle(params.sessionId, session);
                 }
                 break;

@@ -130,6 +130,7 @@ function wrapQuery(generator: AsyncGenerator<any>) {
     interrupt: vi.fn(async () => {}),
     close: vi.fn(),
     setModel: vi.fn(async () => {}),
+    generateSessionTitle: vi.fn(async () => ""),
   }) as any;
 }
 
@@ -3258,6 +3259,94 @@ describe("stop reason propagation", () => {
       (u) => u.update?.sessionUpdate === "session_info_update",
     );
     expect(titleUpdates).toHaveLength(1);
+  });
+
+  it("generates a session title once from the first prompt, not every turn", async () => {
+    const sessionUpdates: any[] = [];
+    const mockClient = {
+      sessionUpdate: async (u: any) => {
+        sessionUpdates.push(u);
+      },
+    } as unknown as AcpClient;
+    const agent = new ClaudeAcpAgent(mockClient, { log: () => {}, error: () => {} });
+
+    // The SDK records the session's first prompt; we seed generation from it.
+    // An empty description makes the SDK's generator return null, so the seed
+    // must be real prompt text.
+    vi.mocked(getSessionInfo).mockResolvedValue({
+      sessionId: "test-session",
+      firstPrompt: "run nix darwin switch and fix the errors",
+      summary: "run nix darwin switch and fix the errors",
+      lastModified: 1_700_000_000_000,
+    } as any);
+
+    const generateSessionTitle = vi.fn(async () => "Run Nix Darwin switch and fix issues");
+
+    const input = new Pushable<any>();
+    async function* messageGenerator() {
+      const iter = input[Symbol.asyncIterator]();
+      // Two turns, each ending in idle. Generation must fire only on the first.
+      for (let i = 0; i < 2; i++) {
+        const { value: userMessage } = await iter.next();
+        yield userEcho(userMessage);
+        yield createResultMessage({ subtype: "success", stop_reason: "end_turn", is_error: false });
+        yield { type: "system", subtype: "session_state_changed", state: "idle" };
+      }
+    }
+
+    agent.sessions["test-session"] = mockSessionState({
+      query: Object.assign(wrapQuery(messageGenerator()), { generateSessionTitle }),
+      input,
+    });
+
+    await agent.prompt({ sessionId: "test-session", prompt: [{ type: "text", text: "one" }] });
+    await agent.prompt({ sessionId: "test-session", prompt: [{ type: "text", text: "two" }] });
+    await agent.sessions["test-session"]?.consumer;
+
+    // Once, seeded by the first prompt (never the empty string), never per-turn.
+    expect(generateSessionTitle).toHaveBeenCalledTimes(1);
+    expect(generateSessionTitle).toHaveBeenCalledWith("run nix darwin switch and fix the errors", {
+      persist: true,
+    });
+
+    // The generated title — not the raw prompt — is pushed to the client.
+    const titleUpdate = sessionUpdates.find(
+      (u) => u.update?.sessionUpdate === "session_info_update",
+    );
+    expect(titleUpdate?.update.title).toBe("Run Nix Darwin switch and fix issues");
+  });
+
+  it("does not generate a title when the user has set a custom one", async () => {
+    const agent = createMockAgent();
+
+    vi.mocked(getSessionInfo).mockResolvedValue({
+      sessionId: "test-session",
+      customTitle: "My renamed session",
+      firstPrompt: "run nix darwin switch and fix the errors",
+      summary: "My renamed session",
+      lastModified: 1_700_000_000_000,
+    } as any);
+
+    const generateSessionTitle = vi.fn(async () => "Generated title");
+
+    const input = new Pushable<any>();
+    async function* messageGenerator() {
+      const iter = input[Symbol.asyncIterator]();
+      const { value: userMessage } = await iter.next();
+      yield userEcho(userMessage);
+      yield createResultMessage({ subtype: "success", stop_reason: "end_turn", is_error: false });
+      yield { type: "system", subtype: "session_state_changed", state: "idle" };
+    }
+
+    agent.sessions["test-session"] = mockSessionState({
+      query: Object.assign(wrapQuery(messageGenerator()), { generateSessionTitle }),
+      input,
+    });
+
+    await agent.prompt({ sessionId: "test-session", prompt: [{ type: "text", text: "one" }] });
+    await agent.sessions["test-session"]?.consumer;
+
+    expect(generateSessionTitle).not.toHaveBeenCalled();
   });
 
   it("should throw internal error for success with is_error true and no max_tokens", async () => {
