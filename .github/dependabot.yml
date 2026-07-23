@@ -11,6 +11,12 @@ updates:
       interval: "daily"
     allow:
       - dependency-type: "all"
+    ignore:
+      # typescript-eslint caps its typescript peer dependency at <6.1.0,
+      # so major bumps of typescript cannot install until it adds support
+      - dependency-name: "typescript"
+        update-types:
+          - "version-update:semver-major"
     groups:
       minor:
         update-types:
