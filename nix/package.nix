@@ -8,7 +8,7 @@
 
 buildNpmPackage (finalAttrs: {
   pname = "claude-agent-acp";
-  version = "0.62.0";
+  version = "0.67.0";
 
   # Restrict the source to the files that actually affect the build, so
   # unrelated changes (CI workflows, README, flake.nix) don't change the
@@ -27,7 +27,7 @@ buildNpmPackage (finalAttrs: {
   # with `nix run nixpkgs#prefetch-npm-deps -- package-lock.json` (or copy the
   # `got:` hash from a build with `npmDepsHash = lib.fakeHash`) after any lockfile
   # change.
-  npmDepsHash = "sha256-Cq5eurS4BgP4h+ASXe+bJiyLzJ27H0S21Dsusw/c+gc=";
+  npmDepsHash = "sha256-fwseed3pLiItJbIz/58vFw0jzfUdFp5MdbJFAVTZgD4=";
 
   nodejs = nodejs_22;
 
