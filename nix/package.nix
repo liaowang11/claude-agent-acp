@@ -8,7 +8,8 @@
 
 buildNpmPackage (finalAttrs: {
   pname = "claude-agent-acp";
-  version = "0.67.0";
+  # Read from package.json so an upstream release bump cannot leave this behind.
+  version = (lib.importJSON ../package.json).version;
 
   # Restrict the source to the files that actually affect the build, so
   # unrelated changes (CI workflows, README, flake.nix) don't change the
@@ -27,7 +28,7 @@ buildNpmPackage (finalAttrs: {
   # with `nix run nixpkgs#prefetch-npm-deps -- package-lock.json` (or copy the
   # `got:` hash from a build with `npmDepsHash = lib.fakeHash`) after any lockfile
   # change.
-  npmDepsHash = "sha256-fwseed3pLiItJbIz/58vFw0jzfUdFp5MdbJFAVTZgD4=";
+  npmDepsHash = "sha256-NgfKYHxGt687Q/TnlPjz8ckH5naZFEGFeCVSo7/1d68=";
 
   nodejs = nodejs_22;
 
