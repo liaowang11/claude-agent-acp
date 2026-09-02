@@ -1,0 +1,62 @@
+name: Update flake inputs
+
+on:
+  schedule:
+    - cron: "0 3 * * 5"
+  workflow_dispatch:
+
+jobs:
+  update-lock:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    outputs:
+      commit_sha: ${{ steps.commit-sha.outputs.commit_sha }}
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+      - uses: cachix/install-nix-action@96951a368ba55167b55f1c916f7d416bac6505fe
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+      - run: nix flake update
+      - run: |
+          if git diff --quiet -- flake.lock; then
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add flake.lock
+          git commit -m "Update flake inputs"
+          git push origin HEAD:main
+      - id: commit-sha
+        run: echo "commit_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  build:
+    needs: update-lock
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            system: aarch64-darwin
+            attrs: .#packages.aarch64-darwin.default
+          - runner: ubuntu-24.04
+            system: x86_64-linux
+            attrs: .#packages.x86_64-linux.default
+    name: ${{ matrix.system }}
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: ${{ needs.update-lock.outputs.commit_sha }}
+      - uses: cachix/install-nix-action@96951a368ba55167b55f1c916f7d416bac6505fe
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: cachix/cachix-action@97e5ff84d02b3b4f9936339f767e17f03c9252ed
+        with:
+          name: iosevka-wliao
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - run: nix flake check --print-build-logs --system ${{ matrix.system }}
+      - run: nix build --print-build-logs ${{ matrix.attrs }}
