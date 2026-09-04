@@ -8414,10 +8414,45 @@ describe("session/fork", () => {
     vi.mocked(importSessionToStore).mockClear();
   });
 
+  it("materializes the forked session so it can be prompted", async () => {
+    const client = { sessionUpdate: async () => {} } as unknown as AcpClient;
+    const agent = new ClaudeAcpAgent(client, { log: () => {}, error: () => {} });
+    vi.mocked(forkSession).mockResolvedValueOnce({ sessionId: "fork-id" });
+    const createSessionSpy = vi.spyOn(agent as any, "createSession").mockResolvedValue({
+      sessionId: "fork-id",
+      modes: { currentModeId: "default", availableModes: [] },
+      configOptions: [],
+    });
+
+    const response = await agent.unstable_forkSession({
+      sessionId: "source-id",
+      cwd: "/workspace",
+      additionalDirectories: ["/workspace/extra"],
+      mcpServers: [],
+    });
+
+    // The SDK fork only writes a transcript. Without a session record keyed by
+    // the new id, the next `session/prompt` answers "Session not found".
+    expect(createSessionSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cwd: "/workspace",
+        additionalDirectories: ["/workspace/extra"],
+      }),
+      expect.objectContaining({ resume: "fork-id" }),
+    );
+    expect(response.modes).toEqual({ currentModeId: "default", availableModes: [] });
+    expect(response.configOptions).toEqual([]);
+  });
+
   it("forks the latest turn in the requested workspace", async () => {
     const client = { sessionUpdate: async () => {} } as unknown as AcpClient;
     const agent = new ClaudeAcpAgent(client, { log: () => {}, error: () => {} });
     vi.mocked(forkSession).mockResolvedValueOnce({ sessionId: "fork-id" });
+    vi.spyOn(agent as any, "createSession").mockResolvedValue({
+      sessionId: "fork-id",
+      modes: { currentModeId: "default", availableModes: [] },
+      configOptions: [],
+    });
 
     const response = await agent.unstable_forkSession({
       sessionId: "source-id",
@@ -8456,6 +8491,11 @@ describe("session/fork", () => {
       },
     ]);
     vi.mocked(forkSession).mockResolvedValueOnce({ sessionId: "fork-id" });
+    vi.spyOn(agent as any, "createSession").mockResolvedValue({
+      sessionId: "fork-id",
+      modes: { currentModeId: "default", availableModes: [] },
+      configOptions: [],
+    });
     const meta = {
       jetbrains: { air: { fork: { version: 1, messageId: "msg_123:segment:0" } } },
     };
@@ -8575,6 +8615,11 @@ describe("session/fork", () => {
       ]);
     });
     vi.mocked(forkSession).mockResolvedValueOnce({ sessionId: "fork-id" });
+    vi.spyOn(agent as any, "createSession").mockResolvedValue({
+      sessionId: "fork-id",
+      modes: { currentModeId: "default", availableModes: [] },
+      configOptions: [],
+    });
 
     const response = await agent.unstable_forkSession({
       sessionId: "source-id",
