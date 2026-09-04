@@ -2129,11 +2129,29 @@ export class ClaudeAcpAgent {
 
   async unstable_forkSession(params: ForkSessionRequest): Promise<ForkSessionResponse> {
     if (this.providerUpdate) await this.providerUpdate;
-    return forkSession(params, {
+    const forked = await forkSession(params, {
       liveMessageIdToUuid: this.sessions[params.sessionId]?.messageIdToUuid,
       logger: this.logger,
       messageIdForGrouping,
     });
+    // The SDK fork only writes the new transcript; it registers nothing under
+    // `this.sessions`, so a `session/prompt` on the returned id answers
+    // "Session not found". Resume the fork here to give it a live query, the
+    // same session record every other creation path builds. This also fills in
+    // the `modes` and `configOptions` that `ForkSessionResponse` carries — a
+    // forked session is a usable session, not just an id.
+    const response = await this.getOrCreateSession({
+      sessionId: forked.sessionId,
+      cwd: params.cwd,
+      mcpServers: params.mcpServers ?? [],
+      additionalDirectories: params.additionalDirectories,
+      _meta: params._meta,
+    });
+    // Needs to happen after we return the session
+    setTimeout(() => {
+      this.sendAvailableCommandsUpdate(response.sessionId);
+    }, 0);
+    return response;
   }
 
   async resumeSession(params: ResumeSessionRequest): Promise<ResumeSessionResponse> {
