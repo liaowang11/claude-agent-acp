@@ -40,12 +40,23 @@ buildNpmPackage (finalAttrs: {
   # automatically; it is spelled out here as documentation.
   npmBuildScript = "build";
 
+  # npm has no libc awareness, so `npm ci` on Linux installs the musl
+  # variants of the platform-specific optional deps alongside the glibc ones.
+  # The musl `claude` binary cannot run in a glibc stdenv (its loader wants
+  # libc.musl-x86_64.so.1), so autoPatchelfHook fails on it; claudeCliPath()
+  # only falls back to the musl variant on musl hosts anyway. Delete them
+  # before the fixup phase patches ELF files.
+  preFixup = lib.optionalString stdenv.hostPlatform.isLinux ''
+    find "$out" -type d -name "*-musl" -prune -exec rm -rf {} +
+  '';
+
   # The Claude Agent SDK spawns a prebuilt, bun-compiled `claude` executable
   # shipped as a platform-specific optional npm dependency (~200 MB), resolved at
   # runtime by `claudeCliPath()`. Stripping it breaks the embedded bun runtime;
   # on Linux its ELF interpreter and rpath must be pointed at nix libraries.
   # Only the host platform's optional dependency is installed by `npm ci`, so
-  # autoPatchelfHook never sees the other platforms' binaries.
+  # autoPatchelfHook never sees the other platforms' binaries (but both libc
+  # variants land on Linux; see preFixup above).
   dontStrip = true;
   nativeBuildInputs = lib.optionals stdenv.hostPlatform.isLinux [ autoPatchelfHook ];
   buildInputs = lib.optionals stdenv.hostPlatform.isLinux [ stdenv.cc.cc.lib ];
