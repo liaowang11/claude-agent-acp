@@ -1,0 +1,84 @@
+name: Sync npmDepsHash
+
+on:
+  workflow_dispatch:
+
+jobs:
+  sync:
+    name: Compute hash, push fixup
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    outputs:
+      commit_sha: ${{ steps.commit-sha.outputs.commit_sha }}
+      updated: ${{ steps.decide.outputs.updated }}
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          # Full history: the fixup target is found with `git log -G`.
+          fetch-depth: 0
+      - uses: cachix/install-nix-action@96951a368ba55167b55f1c916f7d416bac6505fe
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+      - id: decide
+        run: |
+          declared=$(grep -o 'npmDepsHash = "[^"]*"' nix/package.nix | cut -d'"' -f2)
+          actual=$(nix run nixpkgs#prefetch-npm-deps -- package-lock.json)
+          echo "declared: $declared"
+          echo "actual:   $actual"
+          if [ "$declared" = "$actual" ]; then
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+            echo "Already in sync; nothing to commit."
+          else
+            echo "updated=true" >> "$GITHUB_OUTPUT"
+            echo "hash=$actual" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Commit fixup of the last hash-setting commit
+        if: steps.decide.outputs.updated == 'true'
+        env:
+          HASH: ${{ steps.decide.outputs.hash }}
+        run: |
+          target=$(git log -1 --format='%H' -G'npmDepsHash = "sha256-' -- nix/package.nix)
+          sed -i "s|npmDepsHash = \"sha256-[^\"]*\"|npmDepsHash = \"$HASH\"|" nix/package.nix
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ -n "$target" ]; then
+            git commit -a --fixup="$target"
+          else
+            git commit -am "nix: sync npmDepsHash with package-lock.json"
+          fi
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+      - id: commit-sha
+        if: steps.decide.outputs.updated == 'true'
+        run: echo "commit_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: ${{ matrix.system }}
+    needs: sync
+    if: needs.sync.outputs.updated == 'true'
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            system: aarch64-darwin
+            attrs: .#packages.aarch64-darwin.default
+          - runner: ubuntu-24.04
+            system: x86_64-linux
+            attrs: .#packages.x86_64-linux.default
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          ref: ${{ needs.sync.outputs.commit_sha }}
+      - uses: cachix/install-nix-action@96951a368ba55167b55f1c916f7d416bac6505fe
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: cachix/cachix-action@97e5ff84d02b3b4f9936339f767e17f03c9252ed
+        with:
+          name: iosevka-wliao
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+      - run: nix flake check --print-build-logs --system ${{ matrix.system }}
+      - run: nix build --print-build-logs ${{ matrix.attrs }}
