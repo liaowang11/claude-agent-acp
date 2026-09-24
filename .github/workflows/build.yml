@@ -1,0 +1,37 @@
+name: Build
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  package:
+    name: ${{ matrix.system }}
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15
+            system: aarch64-darwin
+            attrs: .#packages.aarch64-darwin.default
+          - runner: ubuntu-24.04
+            system: x86_64-linux
+            attrs: .#packages.x86_64-linux.default
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+      - uses: cachix/install-nix-action@96951a368ba55167b55f1c916f7d416bac6505fe
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: cachix/cachix-action@97e5ff84d02b3b4f9936339f767e17f03c9252ed
+        with:
+          name: iosevka-wliao
+          authToken: ${{ secrets.CACHIX_AUTH_TOKEN }}
+          skipPush: ${{ github.event_name == 'pull_request' }}
+      - run: nix flake check --print-build-logs --system ${{ matrix.system }}
+      - run: nix build --print-build-logs ${{ matrix.attrs }}
