@@ -8,8 +8,31 @@ on:
   workflow_dispatch:
 
 jobs:
+  npm-deps-hash:
+    name: npmDepsHash freshness
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+      - uses: cachix/install-nix-action@96951a368ba55167b55f1c916f7d416bac6505fe
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+      - name: Check npmDepsHash matches package-lock.json
+        run: |
+          declared=$(grep -o 'npmDepsHash = "[^"]*"' nix/package.nix | cut -d'"' -f2)
+          actual=$(nix run nixpkgs#prefetch-npm-deps -- package-lock.json)
+          echo "declared: $declared"
+          echo "actual:   $actual"
+          if [ "$declared" != "$actual" ]; then
+            echo "::error file=nix/package.nix::npmDepsHash is out of date with package-lock.json"
+            echo "::error file=nix/package.nix::Fix: nix run nixpkgs#prefetch-npm-deps -- package-lock.json, then set npmDepsHash = \"$actual\""
+            exit 1
+          fi
+
   package:
     name: ${{ matrix.system }}
+    needs: npm-deps-hash
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
