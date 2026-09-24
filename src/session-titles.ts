@@ -84,10 +84,32 @@ export class SessionTitles {
    *  one. Released by {@link reset}, and when generation yields nothing. */
   private settled = false;
 
+  /** Set while the title this session holds came from the session it was forked
+   *  from, and the client asked for one of this session's own. Released once a
+   *  title of its own lands. */
+  private forked = false;
+
+  /** The inherited title itself, so a `/rename` in the meantime is told apart
+   *  from it and never generated over. Undefined when it could not be read. */
+  private inheritedTitle?: string;
+
   constructor(
     private readonly agent: ClaudeAcpAgent,
     private readonly sessionId: string,
   ) {}
+
+  /** Declare that this session was forked and the title it carries is the
+   *  parent's, so the first turn-end generates over it instead of latching.
+   *
+   *  The SDK writes a `custom-title` entry on every fork — the client's own
+   *  title, or `<parent title> (fork)` — into the same field a `/rename` uses.
+   *  Without this the fork adopts it on its first turn-end and is never titled
+   *  after its own subject. `inheritedTitle` is that stored title, or undefined
+   *  when it could not be read. */
+  markForked(inheritedTitle: string | undefined): void {
+    this.forked = true;
+    this.inheritedTitle = inheritedTitle;
+  }
 
   /** Collect a prompt's own text for the title, skipping openers not worth
    *  titling after. No-op once the title is settled. */
@@ -117,6 +139,8 @@ export class SessionTitles {
     this.settled = false;
     this.context = undefined;
     this.lastTitle = undefined;
+    this.forked = false;
+    this.inheritedTitle = undefined;
   }
 
   /** Turn-end title handling. `idle` is the SDK's turn-over signal, so it is
@@ -126,23 +150,31 @@ export class SessionTitles {
    *  title — a user `/rename` or one generated earlier; the SDK folds both into
    *  that one field. Adopt it and latch, so neither is ever titled over.
    *
+   *  A title inherited from a fork is the exception: it names the conversation
+   *  this one came from, so {@link markForked} has it treated as no title at
+   *  all until one of this session's own lands.
+   *
    *  With no title yet, ask the SDK to generate one in the background: it is a
    *  ~2s small-model call and turn-end must not wait on it. Only when that is
    *  not possible do we fall back to `summary`, which for an SDK-driven session
    *  is just the raw first prompt. */
   async onTurnEnd(session: Session): Promise<void> {
     const info = await this.readSessionInfo(session);
+    const inherited = this.isInherited(info?.customTitle);
 
-    if (info?.customTitle) {
+    if (info?.customTitle && !inherited) {
       this.settled = true;
       this.context = undefined;
+      this.clearInherited();
       await this.publish(info.customTitle, info.lastModified);
       return;
     }
 
-    const fallback = info?.summary
-      ? { title: info.summary, lastModified: info.lastModified }
-      : undefined;
+    // A fork's `summary` is the parent's first prompt, so the title it
+    // inherited is the better of the two to stand on until generation lands.
+    const fallbackTitle = inherited ? info?.customTitle : info?.summary;
+    const fallback =
+      info && fallbackTitle ? { title: fallbackTitle, lastModified: info.lastModified } : undefined;
 
     if (this.canRequest(session)) {
       this.settled = true;
@@ -159,6 +191,26 @@ export class SessionTitles {
     if (fallback && !this.settled) {
       await this.publish(fallback.title, fallback.lastModified);
     }
+  }
+
+  /** Whether `title` is the one this session was forked with rather than one of
+   *  its own. An unknown inherited title — the read at fork time failed —
+   *  counts any stored title as inherited: generation was asked for explicitly,
+   *  and the alternative is latching on the parent's title forever. */
+  private isInherited(title: string | undefined): boolean {
+    if (!this.forked || !title) {
+      return false;
+    }
+    return (
+      this.inheritedTitle === undefined ||
+      sanitizeTitle(this.inheritedTitle) === sanitizeTitle(title)
+    );
+  }
+
+  /** Forget the inherited title, once this session has one of its own. */
+  private clearInherited(): void {
+    this.forked = false;
+    this.inheritedTitle = undefined;
   }
 
   /** Read the SDK's stored info for this session. A missing session file or read
@@ -241,6 +293,7 @@ export class SessionTitles {
     }
 
     this.context = undefined;
+    this.clearInherited();
     await this.publish(title, Date.now());
   }
 }

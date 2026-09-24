@@ -8957,6 +8957,7 @@ describe("logout", () => {
 describe("session/fork", () => {
   beforeEach(() => {
     vi.mocked(forkSession).mockClear();
+    vi.mocked(getSessionInfo).mockReset();
     vi.mocked(getSessionMessages).mockClear();
     vi.mocked(importSessionToStore).mockClear();
   });
@@ -9196,6 +9197,219 @@ describe("session/fork", () => {
       dir: "/workspace",
       upToMessageId: "inactive-assistant-uuid",
     });
+  });
+
+  it("titles the fork with the client's requested title", async () => {
+    const client = { sessionUpdate: async () => {} } as unknown as AcpClient;
+    const agent = new ClaudeAcpAgent(client, { log: () => {}, error: () => {} });
+    vi.mocked(forkSession).mockResolvedValueOnce({ sessionId: "fork-id" });
+    vi.spyOn(agent as any, "createSession").mockResolvedValue({
+      sessionId: "fork-id",
+      modes: { currentModeId: "default", availableModes: [] },
+      configOptions: [],
+    });
+
+    await agent.unstable_forkSession({
+      sessionId: "source-id",
+      cwd: "/workspace",
+      mcpServers: [],
+      _meta: { sessionTitle: " Why does toggle open\n edit mode? " },
+    });
+
+    // Left to the SDK, a fork is titled `<parent title> (fork)`, which says
+    // nothing about what this session is for.
+    expect(forkSession).toHaveBeenCalledWith("source-id", {
+      dir: "/workspace",
+      title: "Why does toggle open edit mode?",
+    });
+  });
+
+  it.each([
+    { kind: "blank", sessionTitle: "   " },
+    { kind: "not text", sessionTitle: { text: "nope" } },
+  ])("ignores a fork title that is $kind", async ({ sessionTitle }) => {
+    const client = { sessionUpdate: async () => {} } as unknown as AcpClient;
+    const agent = new ClaudeAcpAgent(client, { log: () => {}, error: () => {} });
+    vi.mocked(forkSession).mockResolvedValueOnce({ sessionId: "fork-id" });
+    vi.spyOn(agent as any, "createSession").mockResolvedValue({
+      sessionId: "fork-id",
+      modes: { currentModeId: "default", availableModes: [] },
+      configOptions: [],
+    });
+
+    await agent.unstable_forkSession({
+      sessionId: "source-id",
+      cwd: "/workspace",
+      mcpServers: [],
+      _meta: { sessionTitle },
+    });
+
+    expect(forkSession).toHaveBeenCalledWith("source-id", { dir: "/workspace" });
+  });
+
+  it("caps a fork title at the length the SDK stores", async () => {
+    const client = { sessionUpdate: async () => {} } as unknown as AcpClient;
+    const agent = new ClaudeAcpAgent(client, { log: () => {}, error: () => {} });
+    vi.mocked(forkSession).mockResolvedValueOnce({ sessionId: "fork-id" });
+    vi.spyOn(agent as any, "createSession").mockResolvedValue({
+      sessionId: "fork-id",
+      modes: { currentModeId: "default", availableModes: [] },
+      configOptions: [],
+    });
+
+    await agent.unstable_forkSession({
+      sessionId: "source-id",
+      cwd: "/workspace",
+      mcpServers: [],
+      _meta: { sessionTitle: "x".repeat(300) },
+    });
+
+    const title = vi.mocked(forkSession).mock.calls[0]?.[1]?.title ?? "";
+    expect(title).toHaveLength(256);
+    expect(title.endsWith("…")).toBe(true);
+  });
+
+  it("titles a fork taken at an AIR message id too", async () => {
+    const client = { sessionUpdate: async () => {} } as unknown as AcpClient;
+    const agent = new ClaudeAcpAgent(client, { log: () => {}, error: () => {} });
+    vi.mocked(getSessionMessages).mockResolvedValueOnce([
+      {
+        type: "assistant",
+        uuid: "assistant-uuid",
+        session_id: "source-id",
+        message: { id: "msg_123", role: "assistant", content: [] },
+        parent_tool_use_id: null,
+        parent_agent_id: null,
+      },
+    ]);
+    vi.mocked(forkSession).mockResolvedValueOnce({ sessionId: "fork-id" });
+    vi.spyOn(agent as any, "createSession").mockResolvedValue({
+      sessionId: "fork-id",
+      modes: { currentModeId: "default", availableModes: [] },
+      configOptions: [],
+    });
+
+    await agent.unstable_forkSession({
+      sessionId: "source-id",
+      cwd: "/workspace",
+      mcpServers: [],
+      _meta: {
+        sessionTitle: "Why edit mode?",
+        jetbrains: { air: { fork: { version: 1, messageId: "msg_123:segment:0" } } },
+      },
+    });
+
+    expect(forkSession).toHaveBeenCalledWith("source-id", {
+      dir: "/workspace",
+      upToMessageId: "assistant-uuid",
+      title: "Why edit mode?",
+    });
+  });
+
+  it("marks a fork for regeneration, carrying the title it was given", async () => {
+    const client = { sessionUpdate: async () => {} } as unknown as AcpClient;
+    const agent = new ClaudeAcpAgent(client, { log: () => {}, error: () => {} });
+    vi.mocked(forkSession).mockResolvedValueOnce({ sessionId: "fork-id" });
+    const markForked = vi.spyOn(SessionTitles.prototype, "markForked");
+    vi.spyOn(agent as any, "createSession").mockImplementation(async () => {
+      // `supportedCommands` because registering the fork makes the deferred
+      // available-commands push find a real session here.
+      agent.sessions["fork-id"] = mockSessionState(
+        { query: wrapQuery((async function* () {})()) },
+        agent,
+        "fork-id",
+      ) as any;
+      agent.sessions["fork-id"]!.query.supportedCommands = async () => [];
+      return {
+        sessionId: "fork-id",
+        modes: { currentModeId: "default", availableModes: [] },
+        configOptions: [],
+      };
+    });
+
+    await agent.unstable_forkSession({
+      sessionId: "source-id",
+      cwd: "/workspace",
+      mcpServers: [],
+      _meta: { sessionTitle: "Why edit mode?", generateSessionTitle: true },
+    });
+
+    // The title just written is the one the first turn-end must be willing to
+    // title over, so it is handed to the session that has to recognise it.
+    expect(markForked).toHaveBeenCalledWith("Why edit mode?");
+    markForked.mockRestore();
+  });
+
+  it("reads the inherited title when regeneration is asked for without one", async () => {
+    const client = { sessionUpdate: async () => {} } as unknown as AcpClient;
+    const agent = new ClaudeAcpAgent(client, { log: () => {}, error: () => {} });
+    vi.mocked(forkSession).mockResolvedValueOnce({ sessionId: "fork-id" });
+    vi.mocked(getSessionInfo).mockResolvedValueOnce({
+      sessionId: "fork-id",
+      summary: "The parent's opening prompt",
+      customTitle: "Fix the flaky reader (fork)",
+      lastModified: 1_700_000_000_000,
+    } as any);
+    const markForked = vi.spyOn(SessionTitles.prototype, "markForked");
+    vi.spyOn(agent as any, "createSession").mockImplementation(async () => {
+      // `supportedCommands` because registering the fork makes the deferred
+      // available-commands push find a real session here.
+      agent.sessions["fork-id"] = mockSessionState(
+        { query: wrapQuery((async function* () {})()) },
+        agent,
+        "fork-id",
+      ) as any;
+      agent.sessions["fork-id"]!.query.supportedCommands = async () => [];
+      return {
+        sessionId: "fork-id",
+        modes: { currentModeId: "default", availableModes: [] },
+        configOptions: [],
+      };
+    });
+
+    await agent.unstable_forkSession({
+      sessionId: "source-id",
+      cwd: "/workspace",
+      mcpServers: [],
+      _meta: { generateSessionTitle: true },
+    });
+
+    expect(getSessionInfo).toHaveBeenCalledWith("fork-id", { dir: "/workspace" });
+    expect(markForked).toHaveBeenCalledWith("Fix the flaky reader (fork)");
+    markForked.mockRestore();
+  });
+
+  it("leaves an ordinary fork's title to the SDK", async () => {
+    const client = { sessionUpdate: async () => {} } as unknown as AcpClient;
+    const agent = new ClaudeAcpAgent(client, { log: () => {}, error: () => {} });
+    vi.mocked(forkSession).mockResolvedValueOnce({ sessionId: "fork-id" });
+    const markForked = vi.spyOn(SessionTitles.prototype, "markForked");
+    vi.spyOn(agent as any, "createSession").mockImplementation(async () => {
+      // `supportedCommands` because registering the fork makes the deferred
+      // available-commands push find a real session here.
+      agent.sessions["fork-id"] = mockSessionState(
+        { query: wrapQuery((async function* () {})()) },
+        agent,
+        "fork-id",
+      ) as any;
+      agent.sessions["fork-id"]!.query.supportedCommands = async () => [];
+      return {
+        sessionId: "fork-id",
+        modes: { currentModeId: "default", availableModes: [] },
+        configOptions: [],
+      };
+    });
+
+    await agent.unstable_forkSession({
+      sessionId: "source-id",
+      cwd: "/workspace",
+      mcpServers: [],
+    });
+
+    expect(forkSession).toHaveBeenCalledWith("source-id", { dir: "/workspace" });
+    expect(markForked).not.toHaveBeenCalled();
+    expect(getSessionInfo).not.toHaveBeenCalled();
+    markForked.mockRestore();
   });
 });
 

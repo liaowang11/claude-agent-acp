@@ -335,4 +335,140 @@ describe("session titles at turn-end", () => {
     );
     expect(titles()).toEqual(["Investigate Kafka lag alert on prod-3"]);
   });
+
+  // A fork is born with the parent's title, suffixed `(fork)` by the SDK. It
+  // lands in the same `customTitle` field a `/rename` uses, so without help
+  // turn-end adopts it and this session is never titled after its own subject.
+  const INHERITED = "Fix the flaky reader (fork)";
+
+  function forkedSession(agent: ClaudeAcpAgent, session: any, inherited = INHERITED) {
+    agent.sessions["test-session"] = session;
+    session.titles.markForked(inherited);
+    return session;
+  }
+
+  it("generates over a title inherited from a fork", async () => {
+    const { client, titles } = titleRecorder();
+    const agent = newAgent(client);
+
+    vi.mocked(getSessionInfo).mockResolvedValue({
+      sessionId: "test-session",
+      summary: "The parent's opening prompt",
+      customTitle: INHERITED,
+      lastModified: 1_700_000_000_000,
+    } as any);
+
+    const input = new Pushable<any>();
+    const { query, generateSessionTitle } = wrapTitleQuery(
+      oneTurn(input),
+      "Explain add() in hello.py",
+    );
+    forkedSession(agent, mockSessionState({ query, input }, agent));
+
+    await agent.prompt({
+      sessionId: "test-session",
+      prompt: [{ type: "text", text: LONG_PROMPT }],
+    });
+    await agent.sessions["test-session"]?.consumer;
+    await vi.waitFor(() => {
+      expect(generateSessionTitle).toHaveBeenCalledTimes(1);
+    });
+
+    expect(titles()).toEqual(["Explain add() in hello.py"]);
+  });
+
+  it("keeps a fork's inherited title when generation is unavailable", async () => {
+    const { client, titles } = titleRecorder();
+    const agent = newAgent(client);
+
+    vi.mocked(getSessionInfo).mockResolvedValue({
+      sessionId: "test-session",
+      summary: "The parent's opening prompt",
+      customTitle: INHERITED,
+      lastModified: 1_700_000_000_000,
+    } as any);
+
+    const input = new Pushable<any>();
+    // No `generateSessionTitle` on this query, as on an older CLI.
+    forkedSession(agent, mockSessionState({ query: wrapQuery(oneTurn(input)), input }, agent));
+
+    await agent.prompt({
+      sessionId: "test-session",
+      prompt: [{ type: "text", text: LONG_PROMPT }],
+    });
+    await agent.sessions["test-session"]?.consumer;
+
+    // `summary` is the parent's first prompt for a fork, so falling back to it
+    // would be worse than the inherited title, not better.
+    expect(titles()).toEqual([INHERITED]);
+  });
+
+  it("adopts a rename over a fork's inherited title", async () => {
+    const { client, titles } = titleRecorder();
+    const agent = newAgent(client);
+
+    vi.mocked(getSessionInfo).mockResolvedValue({
+      sessionId: "test-session",
+      summary: "Renamed by the user",
+      customTitle: "Renamed by the user",
+      lastModified: 1_700_000_000_000,
+    } as any);
+
+    const input = new Pushable<any>();
+    const { query, generateSessionTitle } = wrapTitleQuery(oneTurn(input), "Generated instead");
+    forkedSession(agent, mockSessionState({ query, input }, agent));
+
+    await agent.prompt({
+      sessionId: "test-session",
+      prompt: [{ type: "text", text: LONG_PROMPT }],
+    });
+    await agent.sessions["test-session"]?.consumer;
+
+    // Only the inherited string is titled over: anything else in that field is
+    // a title of this session's own.
+    expect(generateSessionTitle).not.toHaveBeenCalled();
+    expect(titles()).toEqual(["Renamed by the user"]);
+  });
+
+  it("stops treating a fork's title as inherited once it has one of its own", async () => {
+    const { client, titles } = titleRecorder();
+    const agent = newAgent(client);
+
+    vi.mocked(getSessionInfo)
+      .mockResolvedValueOnce({
+        sessionId: "test-session",
+        summary: "The parent's opening prompt",
+        customTitle: INHERITED,
+        lastModified: 1_700_000_000_000,
+      } as any)
+      .mockResolvedValue({
+        sessionId: "test-session",
+        summary: "Renamed later",
+        customTitle: "Renamed later",
+        lastModified: 1_700_000_000_000,
+      } as any);
+
+    const input = new Pushable<any>();
+    const { query, generateSessionTitle } = wrapTitleQuery(
+      oneTurn(input, 2),
+      "Explain add() in hello.py",
+    );
+    forkedSession(agent, mockSessionState({ query, input }, agent));
+
+    await agent.prompt({
+      sessionId: "test-session",
+      prompt: [{ type: "text", text: LONG_PROMPT }],
+    });
+    await vi.waitFor(() => {
+      expect(generateSessionTitle).toHaveBeenCalledTimes(1);
+    });
+    await agent.prompt({
+      sessionId: "test-session",
+      prompt: [{ type: "text", text: "And what is the capital of France?" }],
+    });
+    await agent.sessions["test-session"]?.consumer;
+
+    expect(generateSessionTitle).toHaveBeenCalledTimes(1);
+    expect(titles()).toEqual(["Explain add() in hello.py", "Renamed later"]);
+  });
 });
