@@ -8,10 +8,15 @@ import {
 } from "@anthropic-ai/claude-agent-sdk";
 import { createHash } from "node:crypto";
 import { assistantMessageText } from "./session-failure-extension.js";
+import { sanitizeTitle } from "./session-titles.js";
 import { SessionTiming } from "./session-timing.js";
 
 type ForkSessionMeta = {
   [key: string]: unknown;
+  /** Title to give the fork, instead of the SDK's `<parent title> (fork)`. */
+  sessionTitle?: unknown;
+  /** Whether the fork's first turn-end should title it after its own subject. */
+  generateSessionTitle?: unknown;
   jetbrains?: {
     air?: {
       fork?: {
@@ -57,6 +62,26 @@ function forkPoint(meta: unknown): ForkPoint | undefined {
       ? { messageOccurrence }
       : {}),
   };
+}
+
+/** The title a client asked the fork to carry, if it sent a usable one.
+ *
+ *  Left to itself the SDK titles every fork `<parent title> (fork)`, which
+ *  names the conversation the fork came from rather than the one it is. A
+ *  client that knows what the fork is for can say so here. */
+export function forkTitle(meta: unknown): string | undefined {
+  const requested = (meta as ForkSessionMeta | null | undefined)?.sessionTitle;
+  if (typeof requested !== "string") return undefined;
+  return sanitizeTitle(requested) || undefined;
+}
+
+/** Whether the client asked for the fork to be titled after its own turns.
+ *
+ *  Opt-in: the title it is born with, supplied or derived, belongs to the
+ *  parent, and {@link SessionTitles.markForked} is what lets the first turn-end
+ *  generate over it. */
+export function forkTitleGenerationRequested(meta: unknown): boolean {
+  return (meta as ForkSessionMeta | null | undefined)?.generateSessionTitle === true;
 }
 
 function forkPointMessageIdCandidates(messageId: string): string[] {
@@ -181,8 +206,12 @@ export async function forkSession(
 ): Promise<ForkSessionResponse> {
   const timing = new SessionTiming(dependencies.logger, "fork", params.sessionId);
   const point = forkPoint(params._meta);
+  const title = forkTitle(params._meta);
   if (!point) {
-    const forked = await forkClaudeSession(params.sessionId, { dir: params.cwd });
+    const forked = await forkClaudeSession(params.sessionId, {
+      dir: params.cwd,
+      ...(title ? { title } : {}),
+    });
     timing.phase("sdk-fork", " resolution=latest");
     return { sessionId: forked.sessionId };
   }
@@ -229,6 +258,7 @@ export async function forkSession(
   const forked = await forkClaudeSession(params.sessionId, {
     dir: params.cwd,
     upToMessageId: messageUuid ?? fullHistoryUuid,
+    ...(title ? { title } : {}),
   });
   timing.phase("sdk-fork");
   return { sessionId: forked.sessionId };
