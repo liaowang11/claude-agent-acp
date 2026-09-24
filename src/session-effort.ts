@@ -5,6 +5,27 @@ import { EFFORT_CONFIG_ID } from "./session-config-ids.js";
 
 export { EFFORT_CONFIG_ID } from "./session-config-ids.js";
 
+// The CLI resolves the effort it sends from `CLAUDE_CODE_EFFORT_LEVEL` ahead
+// of any session or settings effort (see `resolveAppliedEffort` in Claude
+// Code). Seed the effort option from the same env override so the value
+// clients see at boot matches the effort the session actually runs with.
+// 'unset'/'auto' suppress the effort parameter entirely in the CLI, which maps
+// to the "default" sentinel (no explicit level, boot apply skipped).
+// Unrecognized values parse to no override in the CLI, so they fall through
+// to settings here too.
+const EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
+
+export function effortEnvOverride(): EffortLevel | "default" | undefined {
+  const raw = process.env.CLAUDE_CODE_EFFORT_LEVEL?.trim().toLowerCase();
+  if (raw === undefined || raw === "") {
+    return undefined;
+  }
+  if (raw === "unset" || raw === "auto") {
+    return "default";
+  }
+  return (EFFORT_LEVELS as readonly string[]).includes(raw) ? (raw as EffortLevel) : undefined;
+}
+
 // The SDK drops `undefined` during JSON transport and only clears a flag-layer
 // setting when it receives an explicit `null`. Map both an absent picker and
 // the legacy "default" row to null so a previously applied effort is cleared.
