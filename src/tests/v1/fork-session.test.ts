@@ -208,6 +208,23 @@ describe("fork at a session cursor", () => {
     expect(await fs.readFile(sourceFile, "utf8")).toBe(transcript);
   });
 
+  it("gives the fork the title the client asked for", async () => {
+    const [, , followup] = await history();
+    const response = await forkSession(
+      {
+        sessionId,
+        cwd: destinationCwd,
+        mcpServers: [],
+        cursorId: `before:${followup!.uuid}`,
+        _meta: { sessionTitle: "Why the cursor fork" },
+      },
+      { messageIdForGrouping },
+    );
+
+    const forkedFile = path.join(path.dirname(sourceFile), `${response.sessionId}.jsonl`);
+    expect(await fs.readFile(forkedFile, "utf8")).toContain('"Why the cursor fork"');
+  });
+
   it.each([
     ["an id that the session did not announce", () => "cur_9f2c41"],
     // Nothing is before the first entry.
