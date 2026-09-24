@@ -366,6 +366,7 @@ import {
 } from "./gateway-models.js";
 import {
   buildEffortConfigOption,
+  effortEnvOverride,
   EFFORT_CONFIG_ID,
   effortFlagSettings,
   effortLevelName,
@@ -12280,7 +12281,9 @@ export class ClaudeAcpAgent {
         modes,
         models,
         modelInfos,
-        userProvidedOptions?.effort ?? settingsEffortForModel(effortSettings, currentModelInfo),
+        effortEnvOverride() ??
+          userProvidedOptions?.effort ??
+          settingsEffortForModel(effortSettings, currentModelInfo),
         agents,
         currentAgent,
         fastMode,
