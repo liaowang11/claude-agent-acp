@@ -385,6 +385,7 @@ import {
 } from "../providers.js";
 import {
   EFFORT_CONFIG_ID,
+  effortEnvOverride,
   effortFlagSettings,
   effortForModelSwitch,
   mergeEffortSettings,
@@ -10366,7 +10367,9 @@ export class ClaudeAcpAgent {
         modes,
         models,
         modelInfos,
-        userProvidedOptions?.effort ?? settingsEffortForModel(effortSettings, currentModelInfo),
+        effortEnvOverride() ??
+          userProvidedOptions?.effort ??
+          settingsEffortForModel(effortSettings, currentModelInfo),
         agents,
         currentAgent,
         fastMode,
