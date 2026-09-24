@@ -1,5 +1,6 @@
 node_modules
 dist
+result
 .DS_Store
 .claude/*.local.*
 CLAUDE.local.md
