@@ -12,10 +12,15 @@ import { createHash } from "node:crypto";
 import { loadFullSessionHistory, readHistoryAcrossCompactions } from "./resumed-session.js";
 import { forkPointOf } from "./session-cursors.js";
 import { assistantMessageText } from "./session-failure-extension.js";
+import { sanitizeTitle } from "./session-titles.js";
 import { SessionTiming } from "./session-timing.js";
 
 type ForkSessionMeta = {
   [key: string]: unknown;
+  /** Title to give the fork, instead of the SDK's `<parent title> (fork)`. */
+  sessionTitle?: unknown;
+  /** Whether the fork's first turn-end should title it after its own subject. */
+  generateSessionTitle?: unknown;
   jetbrains?: {
     air?: {
       fork?: {
@@ -61,6 +66,26 @@ function forkPoint(meta: unknown): ForkPoint | undefined {
       ? { messageOccurrence }
       : {}),
   };
+}
+
+/** The title a client asked the fork to carry, if it sent a usable one.
+ *
+ *  Left to itself the SDK titles every fork `<parent title> (fork)`, which
+ *  names the conversation the fork came from rather than the one it is. A
+ *  client that knows what the fork is for can say so here. */
+export function forkTitle(meta: unknown): string | undefined {
+  const requested = (meta as ForkSessionMeta | null | undefined)?.sessionTitle;
+  if (typeof requested !== "string") return undefined;
+  return sanitizeTitle(requested) || undefined;
+}
+
+/** Whether the client asked for the fork to be titled after its own turns.
+ *
+ *  Opt-in: the title it is born with, supplied or derived, belongs to the
+ *  parent, and {@link SessionTitles.markForked} is what lets the first turn-end
+ *  generate over it. */
+export function forkTitleGenerationRequested(meta: unknown): boolean {
+  return (meta as ForkSessionMeta | null | undefined)?.generateSessionTitle === true;
 }
 
 function forkPointMessageIdCandidates(messageId: string): string[] {
@@ -205,6 +230,7 @@ async function forkTranscript(
   dependencies: ForkSessionDependencies,
 ): Promise<ForkSessionResponse> {
   const timing = new SessionTiming(dependencies.logger, "fork", params.sessionId);
+  const title = forkTitle(params._meta);
   if (params.cursorId != null) {
     // The history as a replay reads it, which announces the cursors.
     const history = await readHistoryAcrossCompactions(
@@ -219,7 +245,10 @@ async function forkTranscript(
         `Session ${params.sessionId} has no cursor ${params.cursorId} that a fork can start at. Use a cursor that the session announced with the \`fork\` capability, or send the request without \`cursorId\` to fork the whole session.`,
       );
     }
-    const forked = await forkClaudeSession(params.sessionId, { upToMessageId });
+    const forked = await forkClaudeSession(params.sessionId, {
+      upToMessageId,
+      ...(title ? { title } : {}),
+    });
     timing.phase("sdk-fork");
     return { sessionId: forked.sessionId };
   }
@@ -227,7 +256,9 @@ async function forkTranscript(
   // SDK `dir` scopes source lookup, not the fork's working directory. Search
   // all projects: params.cwd can name a different workspace for the new session.
   if (!point) {
-    const forked = await forkClaudeSession(params.sessionId);
+    const forked = title
+      ? await forkClaudeSession(params.sessionId, { title })
+      : await forkClaudeSession(params.sessionId);
     timing.phase("sdk-fork", " resolution=latest");
     return { sessionId: forked.sessionId };
   }
@@ -272,6 +303,7 @@ async function forkTranscript(
 
   const forked = await forkClaudeSession(params.sessionId, {
     upToMessageId: messageUuid ?? fullHistoryUuid,
+    ...(title ? { title } : {}),
   });
   timing.phase("sdk-fork");
   return { sessionId: forked.sessionId };
