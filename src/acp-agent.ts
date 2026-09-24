@@ -270,6 +270,7 @@ import {
 } from "./session-model.js";
 import {
   buildEffortConfigOption,
+  effortEnvOverride,
   EFFORT_CONFIG_ID,
   effortFlagSettings,
   mergeEffortSettings,
@@ -9178,7 +9179,9 @@ export class ClaudeAcpAgent {
         modes,
         models,
         modelInfos,
-        userProvidedOptions?.effort ?? settingsEffortForModel(effortSettings, currentModelInfo),
+        effortEnvOverride() ??
+          userProvidedOptions?.effort ??
+          settingsEffortForModel(effortSettings, currentModelInfo),
         fastMode,
         {
           useRecommendedValue,
