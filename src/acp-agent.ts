@@ -61,6 +61,7 @@ import {
   deleteSession,
   FastModeDisabledReason,
   FastModeState,
+  getSessionInfo,
   getSessionMessages,
   getSubagentMessages,
   listSessions,
@@ -163,7 +164,7 @@ import {
   refusalFallbackResultFromResponse,
   refusalFallbackToCreateRequest,
 } from "./elicitation.js";
-import { forkSession } from "./fork-session.js";
+import { forkSession, forkTitle, forkTitleGenerationRequested } from "./fork-session.js";
 import { subagentHistory } from "./subagent-history.js";
 import {
   readResumedModel,
@@ -2620,11 +2621,33 @@ export class ClaudeAcpAgent {
       additionalDirectories: params.additionalDirectories,
       _meta: params._meta,
     });
+    // Whatever title the fork was born with is the parent's, not this
+    // session's. Hand it over so the first turn-end can tell it apart from a
+    // `/rename` and generate a title of this session's own over it.
+    if (forkTitleGenerationRequested(params._meta)) {
+      const titles = this.sessions[response.sessionId]?.titles;
+      if (titles) {
+        titles.markForked(
+          forkTitle(params._meta) ?? (await this.readStoredTitle(forked.sessionId, params.cwd)),
+        );
+      }
+    }
     // Needs to happen after we return the session
     setTimeout(() => {
       this.sendAvailableCommandsUpdate(response.sessionId);
     }, 0);
     return response;
+  }
+
+  /** The title stored for `sessionId`, best-effort: an unreadable session file
+   *  leaves the title unknown rather than failing the fork. */
+  private async readStoredTitle(sessionId: string, cwd: string): Promise<string | undefined> {
+    try {
+      return (await getSessionInfo(sessionId, { dir: cwd }))?.customTitle;
+    } catch (error) {
+      this.logger.error(`Session ${sessionId}: failed to read the forked title: ${error}`);
+      return undefined;
+    }
   }
 
   async resumeSession(params: ResumeSessionRequest): Promise<ResumeSessionResponse> {
