@@ -64,6 +64,8 @@ import {
   CanUseTool,
   FastModeDisabledReason,
   FastModeState,
+  filterEscalatingDefaultMode,
+  getSessionInfo,
   getSessionMessages,
   HookCallback,
   listSessions,
@@ -206,7 +208,7 @@ import {
   startMcpServerAuthentication as startSharedMcpServerAuthentication,
   supportsMcpOAuth,
 } from "../mcp-oauth.js";
-import { forkSession } from "../fork-session.js";
+import { forkSession, forkTitle, forkTitleGenerationRequested } from "../fork-session.js";
 import {
   clientSystemPrompt,
   sessionSystemPrompt,
@@ -2057,6 +2059,17 @@ export class ClaudeAcpAgent {
       systemPrompt: params.systemPrompt,
       _meta: params._meta,
     });
+    // Whatever title the fork was born with is the parent's, not this
+    // session's. Hand it over so the first turn-end can tell it apart from a
+    // `/rename` and generate a title of this session's own over it.
+    if (forkTitleGenerationRequested(params._meta)) {
+      const titles = this.sessions[sessionId]?.titles;
+      if (titles) {
+        titles.markForked(
+          forkTitle(params._meta) ?? (await this.readStoredTitle(sessionId, params.cwd)),
+        );
+      }
+    }
     this.afterSetupResponse(sessionId, params.mcpServers ?? []);
     return { sessionId, modes, configOptions };
   }
@@ -2066,6 +2079,17 @@ export class ClaudeAcpAgent {
    *  {@link sessionIndex.SessionIndexConnection.forking}). */
   forking<T>(sourceId: string, fork: () => Promise<T>): Promise<T> {
     return this.sessionIndex.forking(sourceId, fork);
+  }
+
+  /** The title stored for `sessionId`, best-effort: an unreadable session file
+   *  leaves the title unknown rather than failing the fork. */
+  private async readStoredTitle(sessionId: string, cwd: string): Promise<string | undefined> {
+    try {
+      return (await getSessionInfo(sessionId, { dir: cwd }))?.customTitle;
+    } catch (error) {
+      this.logger.error(`Session ${sessionId}: failed to read the forked title: ${error}`);
+      return undefined;
+    }
   }
 
   async resumeSession(params: ResumeSessionRequest): Promise<ResumeSessionResponse> {
