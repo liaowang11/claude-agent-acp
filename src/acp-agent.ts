@@ -11431,6 +11431,7 @@ export function toAcpNotifications(
       case "code_execution_tool_result":
       case "bash_code_execution_tool_result":
       case "text_editor_code_execution_tool_result":
+      case "advisor_tool_result":
       case "mcp_tool_result": {
         const wasEmitted = options?.emittedToolCalls?.has(chunk.tool_use_id) === true;
         options?.emittedToolCalls?.delete(chunk.tool_use_id);
@@ -11576,7 +11577,6 @@ export function toAcpNotifications(
       case "container_upload":
       case "compaction":
       case "compaction_delta":
-      case "advisor_tool_result":
       case "fallback":
       case "mcp_tool_listing":
         break;

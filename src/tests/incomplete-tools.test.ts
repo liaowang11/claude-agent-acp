@@ -73,6 +73,17 @@ describe("incomplete foreground tools", () => {
     expect(logError).not.toHaveBeenCalled();
   });
 
+  it("allows a server tool resolved by an advisor_tool_result", async () => {
+    const { prompt, updates, logError } = createTestSession(advisorToolMessages);
+
+    await expect(prompt()).resolves.toMatchObject({ stopReason: "end_turn" });
+    expect(updates.some((u) => u.toolCallId === advisorId && u.status === "failed")).toBe(false);
+    expect(updates).toContainEqual(
+      expect.objectContaining({ toolCallId: advisorId, status: "completed" }),
+    );
+    expect(logError).not.toHaveBeenCalled();
+  });
+
   it("allows a tool explicitly handed off to a background task", async () => {
     const { prompt, updates } = createTestSession(backgroundToolMessages);
 
@@ -278,6 +289,27 @@ async function* completedToolMessages(input: Pushable<any>) {
   yield* echoNextPrompt(input);
   yield toolStart();
   yield toolResult();
+  yield successfulResultMessage();
+}
+
+const advisorId = "srvtoolu_advisor";
+
+// The advisor is a server tool: its call and result both stream in the assistant message.
+async function* advisorToolMessages(input: Pushable<any>) {
+  yield* echoNextPrompt(input);
+  const event = (index: number, content_block: unknown) => ({
+    type: "stream_event",
+    session_id: sessionId,
+    uuid: "stream-message",
+    parent_tool_use_id: null,
+    event: { type: "content_block_start", index, content_block },
+  });
+  yield event(0, { type: "server_tool_use", id: advisorId, name: "advisor", input: {} });
+  yield event(1, {
+    type: "advisor_tool_result",
+    tool_use_id: advisorId,
+    content: { type: "advisor_result", text: "looks good" },
+  });
   yield successfulResultMessage();
 }
 
