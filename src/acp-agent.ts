@@ -449,6 +449,19 @@ const TOOL_USE_WAIT_MS = 2_000;
 /** The number of settled subagents whose parent tool call a session keeps for
  *  a later resume (see `resumableSubagents`). */
 const MAX_RESUMABLE_SUBAGENTS = 256;
+/** System subtypes the CLI marks `@internal` and writes onto the SDK stream
+ *  anyway, none of them in the SDKMessage union: a session title change, a
+ *  git commit/push or published PR, and a tool permission check starting or
+ *  finishing. Nothing here consumes them, so they are dropped before the
+ *  exhaustive switch rather than logged as unexpected.
+ *  Only subtypes seen arriving belong here: an unlisted one should still reach
+ *  `unreachable`, and a listed one would hide a `case` added for it later. */
+const INTERNAL_SYSTEM_SUBTYPES: ReadonlySet<string> = new Set([
+  "session_title_changed",
+  "vcs_state_changed",
+  "code_change_published",
+  "permission_check_status",
+]);
 
 /** Removes a settled task from `liveBackgroundTasks`. A subagent keeps its
  *  parent tool call in `resumableSubagents` for a later resume. */
@@ -6039,6 +6052,13 @@ export class ClaudeAcpAgent {
           !firstUnsettledQueuedTurn()
         ) {
           await asyncTasks.autonomousTurnStarted();
+        }
+
+        {
+          const { type, subtype } = message as { type: string; subtype?: string };
+          if (type === "system" && subtype !== undefined && INTERNAL_SYSTEM_SUBTYPES.has(subtype)) {
+            continue;
+          }
         }
 
         switch (message.type) {
