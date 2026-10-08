@@ -11061,6 +11061,63 @@ describe("stop reason propagation", () => {
     expect(errors.filter((e) => e.includes("Unexpected case"))).toEqual([]);
   });
 
+  it("ignores the CLI's internal system subtypes without logging an unexpected-case error", async () => {
+    // CLI 2.1.287 writes system messages it marks @internal straight onto the
+    // SDK stream: `session_title_changed` on every title change (a fork's
+    // own title, then the generated one) and `vcs_state_changed` /
+    // `code_change_published` after a git commit, push or PR. 2.1.296 adds
+    // `permission_check_status` (checking/done) around each tool permission
+    // decision. None are in the SDKMessage union, so they used to reach
+    // `unreachable`'s error log, which clients show as a notice.
+    const errors: string[] = [];
+    const mockClient = { sessionUpdate: async () => {} } as unknown as AcpClient;
+    const agent = new ClaudeAcpAgent(mockClient, {
+      log: () => {},
+      error: (msg: unknown) => errors.push(String(msg)),
+    });
+
+    injectGeneratorSession(agent, (input) => {
+      async function* messageGenerator() {
+        const iter = input[Symbol.asyncIterator]();
+        const { value: userMessage } = await iter.next();
+        yield { type: "system", subtype: "session_title_changed", title: "Opening question" };
+        yield userEcho(userMessage);
+        yield {
+          type: "system",
+          subtype: "permission_check_status",
+          tool_use_id: "toolu_1",
+          status: "checking",
+        };
+        yield {
+          type: "system",
+          subtype: "permission_check_status",
+          tool_use_id: "toolu_1",
+          status: "done",
+        };
+        yield { type: "system", subtype: "vcs_state_changed", kind: "commit", cwd: "/tmp" };
+        yield {
+          type: "system",
+          subtype: "code_change_published",
+          provider: "github",
+          url: "https://example.com/pr/1",
+          action: "created",
+        };
+        yield createResultMessage({ subtype: "success", stop_reason: "end_turn", is_error: false });
+        yield { type: "system", subtype: "session_title_changed", title: "Generated title" };
+        yield { type: "system", subtype: "session_state_changed", state: "idle" };
+      }
+      return messageGenerator();
+    });
+
+    const response = await agent.prompt({
+      sessionId: "test-session",
+      prompt: [{ type: "text", text: "test" }],
+    });
+
+    expect(response.stopReason).toBe("end_turn");
+    expect(errors.filter((e) => e.includes("Unexpected case"))).toEqual([]);
+  });
+
   it("treats the command_lifecycle 'refused' state (2.1.238+) as terminal, not unknown", async () => {
     // A cross-session peer message declined by the session's receive-side
     // policy gets a terminal `refused` frame instead of no frames at all.
