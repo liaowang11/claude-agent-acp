@@ -596,6 +596,16 @@ describe("incomplete foreground tools", () => {
     expect(logError).not.toHaveBeenCalled();
   });
 
+  it("closes a server tool whose result a steering message cut off", async () => {
+    const { prompt, updates, logError } = createTestSession(steeredServerToolMessages);
+
+    await expect(prompt()).resolves.toMatchObject({ stopReason: "end_turn" });
+    const failed = updates.filter((u) => u.toolCallId === advisorId && u.status === "failed");
+    expect(failed).toHaveLength(1);
+    expect(failed[0].content[0].content.text).toBe("Claude stopped this tool call before it ran.");
+    expect(logError).not.toHaveBeenCalled();
+  });
+
   it("preserves an existing SDK failure", async () => {
     const { prompt } = createTestSession(sdkFailureMessages);
 
@@ -1245,6 +1255,38 @@ async function* advisorToolMessages(input: Pushable<any>) {
     tool_use_id: advisorId,
     content: { type: "advisor_result", text: "looks good" },
   });
+  yield successfulResultMessage();
+}
+
+// A steer cuts off the response that runs a server tool. The complete
+// assistant message holds the server_tool_use, but its result never arrives.
+async function* steeredServerToolMessages(input: Pushable<any>, agent: ClaudeAcpAgent) {
+  const messages = input[Symbol.asyncIterator]();
+  yield userEcho((await messages.next()).value);
+  const block = { type: "server_tool_use", id: advisorId, name: "advisor", input: {} };
+  yield {
+    type: "stream_event",
+    session_id: sessionId,
+    uuid: "stream-message",
+    parent_tool_use_id: null,
+    event: { type: "content_block_start", index: 0, content_block: block },
+  };
+  yield {
+    type: "assistant",
+    session_id: sessionId,
+    parent_tool_use_id: null,
+    message: {
+      role: "assistant",
+      stop_reason: null,
+      usage: successfulResultMessage().usage,
+      content: [block],
+    },
+  };
+  await expect(
+    agent.steer({ sessionId, prompt: [{ type: "text", text: "also check this" }] }),
+  ).resolves.toEqual({ outcome: "injected" });
+  yield userEcho((await messages.next()).value);
+  yield assistantText("Done as you asked.");
   yield successfulResultMessage();
 }
 
