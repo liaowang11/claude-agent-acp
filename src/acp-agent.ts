@@ -4526,6 +4526,13 @@ export class ClaudeAcpAgent {
     // (see Turn.steeredEchoes).
     (turnInFlight.steeredEchoes ??= new Set()).add(steeredUuid);
     (turnInFlight.steeredUuids ??= new Set()).add(steeredUuid);
+    // A steer interrupts server tools inside the current API response. They
+    // have no tool-runner result to wait for once that response is cut off.
+    for (const tool of Object.values(session.toolUseCache)) {
+      if (tool.type === "server_tool_use" && !session.toolCallParents?.has(tool.id)) {
+        session.dispatchedToolCalls?.delete(tool.id);
+      }
+    }
     // A turn already held for background subagents has a recorded outcome the
     // steer supersedes: move it into the steer lane so one lane owns settlement.
     // The idle handler re-applies the hold through the subagent gate.
@@ -13580,11 +13587,17 @@ function recordDispatchedToolCall(session: Session, toolCallId: string): void {
   }
 }
 
-/** Records the tool_use blocks of a complete assistant message. */
+/** Records complete tool calls, except server calls from a response a steer
+ *  interrupted. Its complete assistant message can arrive before the steer's
+ *  echo, after steer() already stopped waiting for those server calls. */
 function recordDispatchedToolUses(session: Session, content: unknown): void {
   if (!Array.isArray(content)) return;
   for (const block of content) {
-    if (isToolUseBlock(block)) recordDispatchedToolCall(session, block.id);
+    if (!isToolUseBlock(block)) continue;
+    if (block.type === "server_tool_use" && (session.activeTurn?.steeredEchoes?.size ?? 0) > 0) {
+      continue;
+    }
+    recordDispatchedToolCall(session, block.id);
   }
 }
 
