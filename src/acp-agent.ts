@@ -12854,11 +12854,16 @@ function recordDispatchedToolCall(session: Session, toolCallId: string): void {
   }
 }
 
-/** Records the tool_use blocks of a complete assistant message. */
+/** Records the tool_use blocks of a complete assistant message. The API runs
+ *  a server_tool_use itself and returns its result in the same response, so
+ *  it never reaches the tool runner: a steer that cuts the response off leaves
+ *  it without a result, abandoned rather than stuck. */
 function recordDispatchedToolUses(session: Session, content: unknown): void {
   if (!Array.isArray(content)) return;
   for (const block of content) {
-    if (isToolUseBlock(block)) recordDispatchedToolCall(session, block.id);
+    if (isToolUseBlock(block) && block.type !== "server_tool_use") {
+      recordDispatchedToolCall(session, block.id);
+    }
   }
 }
 
