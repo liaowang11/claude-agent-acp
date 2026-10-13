@@ -21,7 +21,7 @@ import {
   WriteTextFileRequest,
   WriteTextFileResponse,
 } from "@agentclientprotocol/sdk/unstable";
-import type { AcpSessionNotification } from "../acp-subagents.js";
+import { subagentForm, type AcpSessionNotification } from "../acp-subagents.js";
 import { NativeSubagentRuntime } from "../native-subagents.js";
 import { nodeToWebWritable, nodeToWebReadable } from "../utils.js";
 import {
@@ -2924,7 +2924,11 @@ describe("task notification replay", () => {
       ],
       {
         subagents: {},
-        _meta: { jetbrains: { air: { version: 1, capabilities: ["asyncTasks"] } } },
+        _meta: {
+          jetbrains: {
+            air: { version: 1, capabilities: ["asyncTasks", "nativeSubagentSessions"] },
+          },
+        },
       } as ClientCapabilities,
     );
 
@@ -3105,7 +3109,11 @@ describe("task notification replay", () => {
       ],
       {
         subagents: {},
-        _meta: { jetbrains: { air: { version: 1, capabilities: ["asyncTasks"] } } },
+        _meta: {
+          jetbrains: {
+            air: { version: 1, capabilities: ["asyncTasks", "nativeSubagentSessions"] },
+          },
+        },
       } as ClientCapabilities,
     );
 
@@ -4534,6 +4542,37 @@ describe("subagent transcript replay", () => {
 
       expect(trace.filter((line) => line.includes("idle"))).toEqual([
         'root subagent_update open1 {"state":"idle"}',
+        'root subagent_update stopped1 {"state":"idle","stopReason":"cancelled"}',
+      ]);
+    });
+
+    it("replays the RFD form to an AIR client that declares subagents without nativeSubagentSessions", async () => {
+      const trace = await replayRfd(
+        [
+          user("u1", "Run it"),
+          assistant("a1", [toolUse("toolu_stopped", "Agent", { prompt: "Sleep" })]),
+          user("u2", [toolResult("toolu_stopped", "Stopped.")]),
+        ],
+        {
+          stopped1: {
+            meta: { toolUseId: "toolu_stopped", requestShape: "foreground", stoppedByUser: true },
+            records: [user("s1", "Sleep")],
+          },
+        },
+        {
+          subagents: {},
+          _meta: {
+            jetbrains: { air: { version: 1, capabilities: ["asyncTasks", "sessionIndex"] } },
+          },
+        } as ClientCapabilities,
+      );
+
+      expect(trace).toEqual([
+        "root user_message_chunk Run it",
+        'root subagent_update stopped1 {"state":"running"}',
+        `root session_message toolu_stopped from=${sessionId} recipientMessageId=toolu_stopped Sleep`,
+        `stopped1 session_message toolu_stopped from=${sessionId} senderMessageId=toolu_stopped Sleep`,
+        "root session_message toolu_stopped:reply from=stopped1 Stopped.",
         'root subagent_update stopped1 {"state":"idle","stopReason":"cancelled"}',
       ]);
     });
@@ -14578,6 +14617,33 @@ describe("logout", () => {
     expect(
       (supported.agentCapabilities?.sessionCapabilities as { subagents?: unknown }).subagents,
     ).toEqual({});
+  });
+
+  it("gives an AIR client that declares subagents without nativeSubagentSessions the RFD form", async () => {
+    const airRfd = {
+      subagents: {},
+      _meta: { jetbrains: { air: { version: 1, capabilities: ["asyncTasks", "sessionIndex"] } } },
+    } as ClientCapabilities;
+    expect(subagentForm(airRfd)).toBe("rfd");
+    expect(subagentForm({ subagents: {} } as ClientCapabilities)).toBe("rfd");
+    expect(subagentForm(AIR_NATIVE_SUBAGENTS)).toBe("air");
+    expect(subagentForm({ ...AIR_NATIVE_SUBAGENTS, subagents: {} } as ClientCapabilities)).toBe(
+      "air",
+    );
+    expect(subagentForm(AIR_CLIENT_CAPABILITIES)).toBeUndefined();
+
+    // It gets none of the agent capabilities of AIR's draft, and keeps the
+    // other AIR capabilities.
+    const response = await createMockAgent().initialize({
+      protocolVersion: 1,
+      clientCapabilities: airRfd,
+    });
+    expect(
+      (response.agentCapabilities?.sessionCapabilities as { subagents?: unknown }).subagents,
+    ).toBeUndefined();
+    const advertised = (response._meta as any)?.jetbrains?.air?.capabilities;
+    expect(advertised).not.toContain("nativeSubagentSessions");
+    expect(advertised).toEqual(expect.arrayContaining(["asyncTasks", "sessionIndex"]));
   });
 
   it("advertises canonical AIR sessionFailure support during initialize", async () => {
