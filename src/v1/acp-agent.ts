@@ -1860,6 +1860,11 @@ export class ClaudeAcpAgent {
       metaTerminal: supportsMetaTerminalAuth,
     });
 
+    // The subagents RFD has only the client capability. AIR's draft also had
+    // this agent capability and `nativeSubagentSessions` below, which AIR
+    // gets unless it takes the RFD form (`docs/air-extensions.md`).
+    const airDraftSubagents =
+      this.toolCallCapabilities.air.client && subagentForm(this.clientCapabilities) !== "rfd";
     const sessionCapabilities: SubagentAwareSessionCapabilities = {
       additionalDirectories: {},
       close: {},
@@ -1873,7 +1878,7 @@ export class ClaudeAcpAgent {
       systemPrompt: SYSTEM_PROMPT_CAPABILITY,
       // `session/set_title`.
       title: {},
-      ...(this.toolCallCapabilities.air.client ? { subagents: {} } : {}),
+      ...(airDraftSubagents ? { subagents: {} } : {}),
     };
 
     return {
@@ -1930,7 +1935,7 @@ export class ClaudeAcpAgent {
           ? withAirMeta(
               airSessionFailureCapabilityMeta(
                 AGENT_FILE_CHANGE_REPORT_CAPABILITY,
-                AIR_NATIVE_SUBAGENT_SESSIONS_CAPABILITY,
+                ...(airDraftSubagents ? [AIR_NATIVE_SUBAGENT_SESSIONS_CAPABILITY] : []),
                 AIR_ASYNC_TASKS_CAPABILITY,
                 AIR_CUSTOM_INSTRUCTIONS_CAPABILITY,
                 AIR_RECOMMENDED_CONFIG_VALUE_CAPABILITY,

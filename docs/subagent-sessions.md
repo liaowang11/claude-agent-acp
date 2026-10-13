@@ -1,7 +1,7 @@
 # Subagent sessions
 
-A client that declares `clientCapabilities.subagents`, other than JetBrains AIR, gets each Agent or
-Task subagent as its own child session, following ACP's [subagents](https://agentclientprotocol.com/protocol/v1/subagents):
+A client that declares `clientCapabilities.subagents` gets each Agent or Task subagent as its own
+child session, following ACP's [subagents](https://agentclientprotocol.com/protocol/v1/subagents):
 
 - `subagent_update` on the parent announces the child before any of its traffic, with the
   parent's `title` and `description` for it, and reports its work state: `running`,
@@ -139,7 +139,9 @@ parent lists it, or when the replay held one of its updates. Its own `replay_com
 once, since its replay is empty, and then come the updates that the replay held.
 
 JetBrains AIR keeps the earlier draft of the RFD (`subagent_spawned`, `subagent_state_update`),
-which it enables with `nativeSubagentSessions` in `_meta.jetbrains.air.capabilities`. See
+which it enables with `nativeSubagentSessions` in `_meta.jetbrains.air.capabilities`. A client
+that uses other AIR extensions and declares `clientCapabilities.subagents` without
+`nativeSubagentSessions` gets the RFD above. See
 [AIR extensions](air-extensions.md#native-subagent-sessions).
 
 Without either signal, Agent and Task stay ordinary tool calls and child interactions stay on the
