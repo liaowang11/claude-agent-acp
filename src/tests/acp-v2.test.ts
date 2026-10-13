@@ -1524,7 +1524,13 @@ describe("ACP v2 prompts", () => {
         _meta: { jetbrains: { air: { version: 1, loadReplayEnd: true } } },
       },
     });
-    expect(atResponse.at(-1)?.update).toEqual({ sessionUpdate: "state_update", state: "idle" });
+    // An AIR client that doesn't list `nativeSubagentSessions` takes the RFD
+    // form, and an RFD client gets its background list on each state.
+    expect(atResponse.at(-1)?.update).toEqual({
+      sessionUpdate: "state_update",
+      state: "idle",
+      background: [],
+    });
     expect(client.sessionUpdates.filter(isEnd)).toHaveLength(1);
   });
 
