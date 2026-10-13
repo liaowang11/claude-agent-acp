@@ -38,8 +38,8 @@ npm install @agentclientprotocol/claude-agent-acp@preview
 
 ### Subagent sessions
 
-A client that declares `clientCapabilities.subagents`, other than JetBrains AIR, gets each Agent or
-Task subagent as its own child session, following the [subagents RFD](https://github.com/agentclientprotocol/agent-client-protocol/blob/main/docs/rfds/subagents.mdx):
+A client that declares `clientCapabilities.subagents` gets each Agent or Task subagent as its own
+child session, following the [subagents RFD](https://github.com/agentclientprotocol/agent-client-protocol/blob/main/docs/rfds/subagents.mdx):
 
 - `subagent_update` on the parent announces the child before any of its traffic, with the
   parent's `title` and `description` for it, and reports its work state: `running`,
@@ -96,7 +96,9 @@ are part of v2's baseline. Each child also reports its work state as its own `st
 after the parent's copy.
 
 JetBrains AIR keeps the earlier draft of the RFD (`subagent_spawned`, `subagent_state_update`),
-which it enables with `nativeSubagentSessions` in `_meta.jetbrains.air.capabilities`. See
+which it enables with `nativeSubagentSessions` in `_meta.jetbrains.air.capabilities`. A client
+that uses other AIR extensions and declares `clientCapabilities.subagents` without
+`nativeSubagentSessions` gets the RFD above. See
 [AIR extensions](docs/air-extensions.md#native-subagent-sessions).
 
 Without either signal, Agent and Task stay ordinary tool calls and child interactions stay on the
