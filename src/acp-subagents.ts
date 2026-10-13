@@ -6,7 +6,6 @@ import type {
 import {
   AIR_NATIVE_SUBAGENT_SESSIONS_CAPABILITY,
   clientSupportsAirCapability,
-  isAirClient,
 } from "./air-extension.js";
 
 export { AIR_NATIVE_SUBAGENT_SESSIONS_CAPABILITY } from "./air-extension.js";
@@ -16,18 +15,24 @@ export { AIR_NATIVE_SUBAGENT_SESSIONS_CAPABILITY } from "./air-extension.js";
  *
  * - `rfd`: the subagents RFD (agentclientprotocol/agent-client-protocol#1992,
  *   as revised): `subagent_update` and `session_message`, which the SDK types.
- *   A client that declares `clientCapabilities.subagents` and is not AIR gets
- *   it. (ACP v2 clients do not get subagents yet.)
+ *   A client that declares `clientCapabilities.subagents` gets it, unless it
+ *   is AIR and also lists `nativeSubagentSessions`. So a client that uses
+ *   other AIR extensions, such as agent-shell with `sessionIndex` and
+ *   `asyncTasks`, can still take the RFD form. (ACP v2 clients do not get
+ *   subagents yet.)
  * - `air`: the earlier draft of that RFD, which AIR implements:
- *   `subagent_spawned` and `subagent_state_update`, typed below. AIR gets it,
- *   whichever capability it declares (`docs/air-extensions.md`).
+ *   `subagent_spawned` and `subagent_state_update`, typed below. An AIR
+ *   client that lists `nativeSubagentSessions` in
+ *   `_meta.jetbrains.air.capabilities` gets it (`docs/air-extensions.md`).
  */
 export type SubagentForm = "rfd" | "air";
 
 /** The form of native subagent sessions that the client gets, or none. */
 export function subagentForm(capabilities?: ClientCapabilities | null): SubagentForm | undefined {
   if (!clientSupportsSubagents(capabilities)) return undefined;
-  return isAirClient(capabilities) ? "air" : "rfd";
+  return clientSupportsAirCapability(capabilities, AIR_NATIVE_SUBAGENT_SESSIONS_CAPABILITY)
+    ? "air"
+    : "rfd";
 }
 
 /**
