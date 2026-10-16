@@ -447,8 +447,13 @@ export class AcpToolCallRenderer {
     const { _meta: resultMeta, ...fields } = this.fieldsOfResult(toolUse, result, facts);
     // AIR shows a read or a search that names a path as the list of viewed
     // files. That view does not show the text of the result, so it stays out.
+    // The view renders from rawInput, so only a client that declares
+    // rawInputRendering gets it. An AIR client that declares only, say,
+    // asyncTasks still gets the Read text in content.
     const viewedFiles =
-      this.capabilities.air.client && result.is_error !== true && this.namesViewedFile(toolUse);
+      this.capabilities.air.rawInputRendering &&
+      result.is_error !== true &&
+      this.namesViewedFile(toolUse);
     if (viewedFiles) {
       const content = fields.content?.filter(
         (item) => !(item.type === "content" && item.content.type === "text"),

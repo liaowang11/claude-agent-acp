@@ -113,7 +113,7 @@ describe("tool output in tool call updates", () => {
     expect(notifications[0].update).not.toHaveProperty("rawOutput");
   });
 
-  it("leaves the Read output of a file out for AIR", () => {
+  it("leaves the Read output of a file out for AIR with rawInputRendering", () => {
     const toolUseCache: ToolUseCache = {
       toolu_456: {
         type: "tool_use",
@@ -138,7 +138,11 @@ describe("tool output in tool call updates", () => {
       toolUseCache,
       mockClient,
       mockLogger,
-      { clientCapabilities: AIR_CLIENT },
+      {
+        clientCapabilities: {
+          _meta: { jetbrains: { air: { version: 1, capabilities: ["rawInputRendering"] } } },
+        },
+      },
     );
 
     // AIR shows a Read of a file as the viewed file, so the text stays out.
