@@ -143,15 +143,33 @@ describe("the ACP tool call contract", () => {
   });
 
   it("leaves the Read text out for AIR, which shows the viewed file", () => {
-    const { call, updates } = report(
-      terminalAir,
-      "Read",
-      { file_path: "/work/a.ts" },
-      { content: "x" },
-    );
+    const { call, updates } = report(air, "Read", { file_path: "/work/a.ts" }, { content: "x" });
     expect(call).toMatchObject({ title: "Read a.ts", kind: "read", content: [] });
     expect(updates[0]).not.toHaveProperty("content");
     expect(updates[0]).not.toHaveProperty("rawOutput");
+  });
+
+  it("keeps the Read and Grep text for an AIR client without rawInputRendering", () => {
+    const asyncOnly: ClientCapabilities = {
+      _meta: { jetbrains: { air: { version: 1, capabilities: ["asyncTasks", "sessionIndex"] } } },
+    };
+    for (const capabilities of [asyncOnly, terminalAir]) {
+      const read = report(capabilities, "Read", { file_path: "/work/a.ts" }, { content: "x" });
+      expect(read.updates[0].content).toEqual([
+        { type: "content", content: { type: "text", text: expect.stringContaining("x") } },
+      ]);
+      expect(read.updates[0]).not.toHaveProperty("rawOutput");
+
+      const grep = report(
+        capabilities,
+        "Grep",
+        { pattern: "a", path: "/work" },
+        { content: "a.ts" },
+      );
+      expect(grep.updates[0].content).toEqual([
+        { type: "content", content: { type: "text", text: "a.ts" } },
+      ]);
+    }
   });
 
   it("leaves the Grep text out for AIR only when the input names a path", () => {
