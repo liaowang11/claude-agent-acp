@@ -28,7 +28,7 @@ buildNpmPackage (finalAttrs: {
   # with `nix run nixpkgs#prefetch-npm-deps -- package-lock.json` (or copy the
   # `got:` hash from a build with `npmDepsHash = lib.fakeHash`) after any lockfile
   # change.
-  npmDepsHash = "sha256-ARdkZXIgFIJ+lzUqFKyd4J6zjJHnMrFKDzBMEneAzRc=";
+  npmDepsHash = "sha256-xJC3/3aKvYUa4wmg4nkknERHQMHSssmhSudGW61wDJI=";
 
   nodejs = nodejs_22;
 
