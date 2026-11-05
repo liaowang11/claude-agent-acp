@@ -126,15 +126,15 @@ export function replayEndUpdate(
 }
 
 /**
- * Starts OAuth for the setup request's MCP servers that need it, and Remote
- * Control for a query that Claude Code asked to start with it, once the setup
- * response is sent: v2 asks for no elicitation before it, and the Remote
- * Control notice belongs after it. The handler returns the response right
- * after this call, and the SDK writes it before a timer runs. Nothing else
- * orders the two. A restart calls it on the new query too: closing the old
- * one withdrew the old one's OAuth runs. The restart starts Remote Control
- * itself, before the prompts that wait for it (see `restarts.ts`), so the
- * timer's connect finds the request used up then.
+ * Starts OAuth for the setup request's MCP servers that need it, publishes the
+ * session's messaging name, and starts Remote Control for a query that Claude
+ * Code asked to start with it, once the setup response is sent: v2 asks for no
+ * elicitation before it, and the Remote Control notice belongs after it. The
+ * handler returns the response right after this call, and the SDK writes it
+ * before a timer runs. Nothing else orders the two. A restart calls it on the
+ * new query too: closing the old one withdrew the old one's OAuth runs. The
+ * restart starts Remote Control itself, before the prompts that wait for it
+ * (see `restarts.ts`), so the timer's connect finds the request used up then.
  */
 export function afterSetupResponse(session: V2Session, params: SetupParams): void {
   setTimeout(() => session.connectRemoteControlAtStartup(), 0);
@@ -142,6 +142,8 @@ export function afterSetupResponse(session: V2Session, params: SetupParams): voi
   const names = (params.mcpServers ?? []).flatMap((server) =>
     typeof server.name === "string" ? [server.name] : [],
   );
-  if (names.length === 0) return;
-  setTimeout(() => session.elicitations.authenticateMcpServers(names), 0);
+  setTimeout(() => {
+    void session.publishMessagingName();
+    if (names.length > 0) session.elicitations.authenticateMcpServers(names);
+  }, 0);
 }
