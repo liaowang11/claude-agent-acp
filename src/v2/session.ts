@@ -55,6 +55,7 @@ import { AUTONOMOUS_RESULT_ORIGINS } from "../result-end.js";
 import { promptToClaude } from "../prompt-to-claude.js";
 import type { Logger } from "../logger.js";
 import type { McpCommand } from "../mcp-command.js";
+import { messagingNameMeta, readMessagingName } from "../messaging-name.js";
 import type { ElicitationSupport } from "../elicitation.js";
 import { Pushable } from "../utils.js";
 import { v1PromptRequest } from "./prompt.js";
@@ -187,6 +188,10 @@ export class V2Session implements RequestTarget {
   private ownCommandDone: (() => void) | undefined;
   /** The `background` lists of the session and its children, stamped on each state. */
   private readonly background: V2Background;
+  /** The CLI's own session id, from its latest `system`/init. */
+  private cliSessionId?: string;
+  /** Last messaging name address sent to the client, so an unchanged name is not re-sent. */
+  private lastPublishedMessagingAddress?: string;
   readonly tasks: SessionTasks;
   readonly elicitations: SessionElicitations;
   /** AIR's file-change reports, when the client declared them (see `file-changes.ts`). */
@@ -987,6 +992,8 @@ export class V2Session implements RequestTarget {
       case "system":
         switch (message.subtype) {
           case "init":
+            if (typeof message.session_id === "string") this.cliSessionId = message.session_id;
+            void this.publishMessagingName();
             if (message.capabilities?.includes("msg_lifecycle_v1")) this.lifecycleFrames = true;
             this.elicitations.init(message.capabilities);
             // A fresh init (such as after a reinitialize) can carry another Fast mode state.
@@ -1037,9 +1044,16 @@ export class V2Session implements RequestTarget {
               this.reports.idle();
             }
             return;
-          default:
+          default: {
+            // `session_title_changed` is internal to the CLI and absent from the SDK's types.
+            const { subtype } = message as { subtype?: string };
+            if (subtype === "session_title_changed") {
+              void this.publishMessagingName();
+              return;
+            }
             this.report(message);
             return;
+          }
         }
       default:
         this.report(message);
@@ -1440,6 +1454,20 @@ export class V2Session implements RequestTarget {
 
   private send(update: v2.SessionUpdate): void {
     this.sendNotification({ sessionId: this.sessionId, update });
+  }
+
+  /**
+   * Publishes the name other Claude Code sessions use to message this one,
+   * read from the CLI's session record (see `messaging-name.ts`). The setup
+   * response and each init or title change call it; an unchanged or
+   * unreadable name sends nothing.
+   */
+  async publishMessagingName(): Promise<void> {
+    if (!this.cliSessionId) return;
+    const name = await readMessagingName(this.cliSessionId);
+    if (!name || name.address === this.lastPublishedMessagingAddress) return;
+    this.lastPublishedMessagingAddress = name.address;
+    this.send({ sessionUpdate: "session_info_update", _meta: messagingNameMeta(name) });
   }
 
   /** Sends an update of the session or of a child, with its `background` list. */

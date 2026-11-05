@@ -118,17 +118,20 @@ export function replayEndUpdate(
 }
 
 /**
- * Starts OAuth for the setup request's MCP servers that need it, once the
- * setup response is sent: v2 asks for no elicitation before it. The handler
- * returns the response right after this call, and the SDK writes it before a
- * timer runs. Nothing else orders the two. A restart calls it on the new
- * query too: closing the old one withdrew the old one's OAuth runs.
+ * Starts OAuth for the setup request's MCP servers that need it and publishes
+ * the session's messaging name, once the setup response is sent: v2 asks for
+ * no elicitation before it. The handler returns the response right after this
+ * call, and the SDK writes it before a timer runs. Nothing else orders the
+ * two. A restart calls it on the new query too: closing the old one withdrew
+ * the old one's OAuth runs.
  */
 export function afterSetupResponse(session: V2Session, params: SetupParams): void {
   // The setup already rejected servers of an unknown transport.
   const names = (params.mcpServers ?? []).flatMap((server) =>
     typeof server.name === "string" ? [server.name] : [],
   );
-  if (names.length === 0) return;
-  setTimeout(() => session.elicitations.authenticateMcpServers(names), 0);
+  setTimeout(() => {
+    void session.publishMessagingName();
+    if (names.length > 0) session.elicitations.authenticateMcpServers(names);
+  }, 0);
 }
