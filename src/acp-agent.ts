@@ -108,6 +108,7 @@ import {
 } from "./goal-extension.js";
 import { blobResourceToClaude } from "./blob-resources.js";
 import { promptSuggestionsMeta, promptSuggestionText } from "./prompt-suggestions.js";
+import { messagingNameMeta, readMessagingName } from "./messaging-name.js";
 import { sanitizeTitle, SessionTitles } from "./session-titles.js";
 import {
   AIR_NATIVE_SUBAGENT_SESSIONS_CAPABILITY,
@@ -1101,6 +1102,12 @@ export type Session = {
   /** Last follow-up prompt sent to the ACP client (`null` after a clear), so an
    *  unchanged prediction is not re-notified. Undefined until the first push. */
   lastPublishedPromptSuggestion?: string | null;
+  /** The CLI's own session id, from its latest `system`/init. It differs from
+   *  the ACP session id after a context clear. */
+  cliSessionId?: string;
+  /** Last messaging name address sent to the ACP client (see
+   *  `messaging-name.ts`), so an unchanged name is not re-notified. */
+  lastPublishedMessagingAddress?: string;
   /** Whether an arriving `prompt_suggestion` still answers the turn the user is
    *  waiting on: set at a turn's result, cleared when the next prompt arrives.
    *  A prediction the user outran — the next prompt was sent before the
@@ -4493,6 +4500,25 @@ export class ClaudeAcpAgent {
     });
   }
 
+  /**
+   * Publishes the name other Claude Code sessions use to message this one,
+   * read from the CLI's session record (see `messaging-name.ts`). Runs after a
+   * session setup response and on each init and title change; an unchanged or
+   * unreadable name sends nothing.
+   */
+  async publishMessagingName(sessionId: string): Promise<void> {
+    const session = this.sessions[sessionId];
+    if (!session?.cliSessionId) return;
+    const name = await readMessagingName(session.cliSessionId);
+    if (this.sessions[sessionId] !== session) return;
+    if (!name || name.address === session.lastPublishedMessagingAddress) return;
+    session.lastPublishedMessagingAddress = name.address;
+    await this.client.sessionUpdate({
+      sessionId,
+      update: { sessionUpdate: "session_info_update", _meta: messagingNameMeta(name) },
+    });
+  }
+
   private async publishTaskPlan(sessionId: string, taskState: TaskState): Promise<void> {
     const entries = changedTaskPlanEntries(taskState, this.toolCallCapabilities.air.client);
     if (!entries) return;
@@ -6284,6 +6310,13 @@ export class ClaudeAcpAgent {
 
         {
           const { type, subtype } = message as { type: string; subtype?: string };
+          if (type === "system" && (subtype === "init" || subtype === "session_title_changed")) {
+            if (subtype === "init") {
+              const cliSessionId = (message as { session_id?: unknown }).session_id;
+              if (typeof cliSessionId === "string") session.cliSessionId = cliSessionId;
+            }
+            await this.publishMessagingName(params.sessionId);
+          }
           if (type === "system" && subtype !== undefined && INTERNAL_SYSTEM_SUBTYPES.has(subtype)) {
             continue;
           }
@@ -11404,6 +11437,7 @@ export class ClaudeAcpAgent {
     setTimeout(() => {
       this.sendAvailableCommandsUpdate(sessionId);
       void this.publishCurrentSubagentStates(sessionId);
+      void this.publishMessagingName(sessionId);
       startMcpAuthentication(this, sessionId, mcpServers);
     }, 0);
   }
@@ -12831,6 +12865,8 @@ export class ClaudeAcpAgent {
           settingsManager.getApiKeyHelper(configuredSettingsObject),
         )?.kind,
         fileChangeReporter,
+        // The CLI runs the conversation it resumes, or the id given it here.
+        cliSessionId: options.sessionId ?? creationOpts?.resume,
       };
       const registered = this.sessions[sessionId];
       registered.idleCompaction = new IdleCompaction(

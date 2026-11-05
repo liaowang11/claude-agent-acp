@@ -239,6 +239,7 @@ function afterSetupResponse(
       });
     }
     then?.();
+    void agent.publishMessagingName(sessionId);
     agent.authenticateMcpServers(sessionId, mcpServers);
   }, 0);
 }
