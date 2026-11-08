@@ -1,10 +1,16 @@
 /**
  * The commands the adapter serves itself instead of passing to Claude Code
- * (`/remote-control` and `/plugin`), in one place so that the command list and
+ * (`/remote-control`, `/plugin` and `/chrome`), in one place so that the command list and
  * the dispatch in the v1 and v2 cores apply the same rule.
  */
 import type { AvailableCommand } from "@agentclientprotocol/sdk/unstable";
-import type { Query, SlashCommand } from "@anthropic-ai/claude-agent-sdk";
+import type { McpServerConfig, Query, SlashCommand } from "@anthropic-ai/claude-agent-sdk";
+import {
+  CHROME_AVAILABLE_COMMAND,
+  CHROME_COMMAND_NAME,
+  parseChromeCommand,
+  runChromeCommand,
+} from "./chrome-command.js";
 import { claudeCliPath, isRemoteSession } from "./claude-cli.js";
 import type { NewSessionMeta } from "./new-session-meta.js";
 import {
@@ -27,7 +33,8 @@ import {
 type PromptContent = ReadonlyArray<{ type: string; text?: unknown }>;
 
 export interface AdapterCommand {
-  readonly name: typeof REMOTE_CONTROL_COMMAND_NAME | typeof PLUGIN_COMMAND_NAME;
+  readonly name:
+    typeof REMOTE_CONTROL_COMMAND_NAME | typeof PLUGIN_COMMAND_NAME | typeof CHROME_COMMAND_NAME;
   /** The `RequestError` text while Claude is working. */
   readonly busyMessage: string;
   /** The `RequestError` text while another adapter command runs. */
@@ -46,6 +53,10 @@ export interface AdapterCommandContext {
   /** The session runs Claude Code remotely (`sdk-url`). */
   remoteSession: boolean;
   query: () => Query | undefined;
+  /** The `mcpServers` the query was created with. `/chrome` passes them along
+   *  with the Chrome server, because `setMcpServers` replaces the whole set. A
+   *  core that leaves this out does not serve `/chrome`. */
+  mcpServers?: () => Record<string, McpServerConfig>;
   logError: (message: string) => void;
 }
 
@@ -73,7 +84,11 @@ const REMOTE_CONTROL_ENTRY: AvailableCommand = {
  *  the form of an adapter command. Whether the adapter serves it is
  *  {@link adapterCommand}'s decision. */
 export function mayBeAdapterCommand(prompt: PromptContent): boolean {
-  return parseRemoteControlCommand(prompt) !== null || parsePluginCommand(prompt) !== null;
+  return (
+    parseRemoteControlCommand(prompt) !== null ||
+    parsePluginCommand(prompt) !== null ||
+    parseChromeCommand(prompt as Parameters<typeof parseChromeCommand>[0]) !== null
+  );
 }
 
 /** The adapter command of `prompt` that the adapter runs, or `null` for a
@@ -94,6 +109,38 @@ export async function adapterCommand(
       remoteControl: remoteControl.command,
       run: () =>
         runRemoteControlCommand(remoteControl.query, remoteControl.command, context.logError),
+    };
+  }
+
+  // `/chrome` is the adapter's own while Claude Code offers no command of that
+  // name to an ACP client: Claude Code's `/chrome` is a terminal dialog.
+  const chrome = parseChromeCommand(prompt as Parameters<typeof parseChromeCommand>[0]);
+  const mcpServers = context.mcpServers;
+  // A session with `sdk-url` runs Claude Code on another machine, where the
+  // local `claude` path that `/chrome` adds as the server would not run.
+  if (chrome && mcpServers && !context.remoteSession) {
+    if (
+      claudeCodeOffersCommand(
+        await query.supportedCommands(),
+        terminalCommands,
+        CHROME_COMMAND_NAME,
+      )
+    ) {
+      return null;
+    }
+    return {
+      name: CHROME_COMMAND_NAME,
+      busyMessage:
+        "Claude in Chrome can't be changed while Claude is working. Try again when the turn ends.",
+      inFlightMessage: "Another adapter command is running. Try again in a moment.",
+      run: async () =>
+        runChromeCommand(
+          context.query() ?? query,
+          chrome,
+          mcpServers(),
+          await claudeCliPath(),
+          context.logError,
+        ),
     };
   }
 
@@ -139,7 +186,7 @@ export function adapterAvailableCommands(
 ): AvailableCommand[] {
   const entries: AvailableCommand[] = [];
   if (query && supportsRemoteControl(query)) entries.push(REMOTE_CONTROL_ENTRY);
-  if (!remoteSession) entries.push(PLUGIN_AVAILABLE_COMMAND);
+  if (!remoteSession) entries.push(PLUGIN_AVAILABLE_COMMAND, CHROME_AVAILABLE_COMMAND);
   return entries.filter(
     (entry) => !claudeCodeOffersCommand(commands, terminalCommands, entry.name),
   );

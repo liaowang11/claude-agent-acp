@@ -541,6 +541,12 @@ const SESSION_COMMANDS: v2.AvailableCommand[] = [
     input: { type: "text", hint: "[reconnect|enable|disable [<server>|all]]" },
   },
   expect.objectContaining({ type: "command", name: "plugin" }),
+  {
+    type: "command",
+    name: "chrome",
+    description: "Connect Claude in Chrome to this session, or disconnect it",
+    input: { type: "text", hint: "[on|off]" },
+  },
 ];
 
 describe("ACP v2 sessions", () => {

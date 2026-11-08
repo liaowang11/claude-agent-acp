@@ -18,10 +18,7 @@
  *   `compaction_summary_chunk` text that went out before it.
  * - A subagent message or thought is not sent again in full when the chunks
  *   of the same message that went out before it hold the same text.
- * - An `available_commands_update` also lists the `mcp` and `plugin`
- *   commands of the adapter (see {@link ADAPTER_COMMANDS}), when origin/main
- *   did not list them. The adapter replaces the text of `/mcp` for every
- *   client, and serves `/plugin`, which Claude Code refuses in SDK mode.
+export const ADAPTER_COMMANDS = new Set(["mcp", "plugin", "chrome"]);
  * - The `initialize` response does not advertise
  *   `agentCapabilities.sessionCapabilities.subagents`: the subagents RFD has
  *   only the client capability, and only AIR's draft keeps the agent one.
@@ -71,7 +68,7 @@ export const AIR_ONLY_META_KEYS = new Set([
 export const AIR_ONLY_CLAUDE_CODE_KEYS = new Set(["title", "subagent", "skill", "skillPath"]);
 
 /** The names of the commands that the adapter adds to `available_commands_update`. */
-export const ADAPTER_COMMANDS = new Set(["mcp", "plugin"]);
+export const ADAPTER_COMMANDS = new Set(["mcp", "plugin", "chrome"]);
 
 /** The tool call fields that an update replaces as a whole. */
 const REPLACED_FIELDS = [

@@ -5238,6 +5238,7 @@ describe("request validation", () => {
       ["compact", "Compact the conversation"],
       ["mcp", expect.any(String)],
       ["plugin", expect.any(String)],
+      ["chrome", expect.any(String)],
     ]);
   });
 });
@@ -14935,11 +14936,12 @@ describe("terminal slash command filtering", () => {
     const updates = sessionUpdate.mock.calls.map((c: any[]) => (c[0] as { update: any }).update);
     const commandsUpdate = updates.find((u) => u.sessionUpdate === "available_commands_update");
     expect(commandsUpdate).toBeDefined();
-    // `mcp` and `plugin` are the adapter's own entries, advertised after the CLI's commands.
+    // `mcp`, `plugin` and `chrome` are the adapter's own entries, advertised after the CLI's commands.
     expect(commandsUpdate.availableCommands.map((c: { name: string }) => c.name)).toEqual([
       "compact",
       "mcp",
       "plugin",
+      "chrome",
     ]);
   });
 
@@ -15113,6 +15115,7 @@ describe("skill commands in available_commands_update", () => {
       ["mcp:review", undefined],
       ["mcp", undefined],
       ["plugin", undefined],
+      ["chrome", undefined],
     ]);
   });
 
@@ -15138,6 +15141,7 @@ describe("skill commands in available_commands_update", () => {
       ["mcp:review", undefined],
       ["mcp", undefined],
       ["plugin", undefined],
+      ["chrome", undefined],
     ]);
   });
 });

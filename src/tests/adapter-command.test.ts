@@ -29,6 +29,29 @@ const context = (remoteSession = false): AdapterCommandContext => ({
 });
 
 describe("adapterCommand", () => {
+  it("serves /chrome when the core passes the session's MCP servers", async () => {
+    const withServers = { ...context(), mcpServers: () => ({}) };
+    for (const prompt of ["/chrome", "/chrome on", "/chrome off"]) {
+      const command = await adapterCommand(text(prompt), fakeQuery([]), undefined, withServers);
+      expect(command?.name).toBe("chrome");
+    }
+    expect(mayBeAdapterCommand(text("/chrome on"))).toBe(true);
+  });
+
+  it("leaves /chrome to Claude Code without MCP servers, remotely, or when Claude Code offers it", async () => {
+    const withServers = (remote = false) => ({ ...context(remote), mcpServers: () => ({}) });
+    expect(await adapterCommand(text("/chrome"), fakeQuery([]), undefined, context())).toBeNull();
+    expect(
+      await adapterCommand(text("/chrome"), fakeQuery([]), undefined, withServers(true)),
+    ).toBeNull();
+    expect(
+      await adapterCommand(text("/chrome"), fakeQuery(["chrome"]), undefined, withServers()),
+    ).toBeNull();
+    expect(
+      await adapterCommand(text("/chrome maybe"), fakeQuery([]), undefined, withServers()),
+    ).toBeNull();
+  });
+
   it("serves /remote-control and runs it", async () => {
     const command = await adapterCommand(
       text("/remote-control"),
@@ -127,13 +150,13 @@ describe("mayBeAdapterCommand", () => {
 describe("adapterAvailableCommands", () => {
   const names = (list: { name: string }[]) => list.map((command) => command.name);
 
-  it("lists remote-control and plugin", () => {
+  it("lists remote-control, plugin and chrome", () => {
     expect(
       names(adapterAvailableCommands([], undefined, fakeQuery([]), { remoteSession: false })),
-    ).toEqual(["remote-control", "plugin"]);
+    ).toEqual(["remote-control", "plugin", "chrome"]);
   });
 
-  it("omits plugin for a remote session and remote-control without support", () => {
+  it("omits plugin and chrome for a remote session and remote-control without support", () => {
     expect(
       names(adapterAvailableCommands([], undefined, fakeQuery([]), { remoteSession: true })),
     ).toEqual(["remote-control"]);
@@ -142,7 +165,7 @@ describe("adapterAvailableCommands", () => {
     ).toEqual([]);
     expect(
       names(adapterAvailableCommands([], undefined, undefined, { remoteSession: false })),
-    ).toEqual(["plugin"]);
+    ).toEqual(["plugin", "chrome"]);
   });
 
   it("agrees with dispatch on a bare /plugin", async () => {

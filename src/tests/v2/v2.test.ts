@@ -1217,6 +1217,8 @@ describe("ACP v2 core", () => {
       expect.objectContaining({ type: "command", name: "mcp" }),
       // The adapter's own `/plugin`.
       expect.objectContaining({ type: "command", name: "plugin" }),
+      // The adapter's own `/chrome`.
+      expect.objectContaining({ type: "command", name: "chrome" }),
     ]);
     // Each prompt is echoed, and the session's state is reported.
     expect(claude.options.extraArgs).toMatchObject({ "replay-user-messages": "" });

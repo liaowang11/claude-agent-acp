@@ -69,6 +69,7 @@ import {
   getSessionMessages,
   HookCallback,
   listSessions,
+  type McpServerConfig,
   ModelInfo,
   OnElicitation,
   OnUserDialog,
@@ -1040,6 +1041,9 @@ export type Session = {
   /** Remote Control at the start of this query, which Claude Code can ask for
    *  at `initialize` (see {@link ClaudeAcpAgent.connectRemoteControlAtStartup}). */
   remoteControlAtStartup?: RemoteControlAtStartup;
+  /** The `mcpServers` the query was created with. `/chrome` passes them along
+   *  with the Chrome server, because `setMcpServers` replaces the whole set. */
+  mcpServers?: Record<string, McpServerConfig>;
   /** The resolved SKILL.md paths of the skill commands, keyed by the cwd and
    *  the command name. A `commands_changed` clears it, because the skill
    *  files can have changed then. */
@@ -3010,6 +3014,7 @@ export class ClaudeAcpAgent {
         ...sessionAdapterOptions(session.creationParams),
         // The query can be replaced by a rewind or respawn while the command runs.
         query: () => this.sessions[sessionId]?.query,
+        mcpServers: () => session.mcpServers ?? {},
         logError: (message) => this.logger.error(message),
       }),
     }));
@@ -11357,6 +11362,7 @@ export class ClaudeAcpAgent {
         unservedMcpServers,
         settingsManager,
         effortSettingsOverride: configuredSettingsObject,
+        mcpServers: options.mcpServers,
         titles: new SessionTitles(this, sessionId),
         accumulatedUsage: {
           inputTokens: 0,
