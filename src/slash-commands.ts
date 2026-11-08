@@ -5,6 +5,7 @@
 import type { AvailableCommand } from "@agentclientprotocol/sdk/unstable";
 import type { Query, SlashCommand } from "@anthropic-ai/claude-agent-sdk";
 import { AIR_KIND_KEY, AIR_SKILL_PATH_KEY, withAirMeta } from "./air-extension.js";
+import { CHROME_AVAILABLE_COMMAND } from "./chrome-command.js";
 import { MCP_AVAILABLE_COMMAND } from "./mcp-command.js";
 import {
   claudeCodeOffersCommand,
@@ -113,7 +114,7 @@ export function getAvailableSlashCommands(
   return [
     ...advertised,
     MCP_AVAILABLE_COMMAND,
-    ...remoteControlCommands.filter(
+    ...[...remoteControlCommands, CHROME_AVAILABLE_COMMAND].filter(
       (command) => !claudeCodeOffersCommand(commands, terminalCommands, command.name),
     ),
   ].filter((command) => {

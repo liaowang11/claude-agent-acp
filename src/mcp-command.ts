@@ -270,11 +270,14 @@ export type McpControlQuery = Pick<
  *  adapter tried to reconnect. */
 export type McpCommandOutcome = { markdown: string | null; reconnected: string[] };
 
-type CallResult = { type: "done" } | { type: "failed"; error: string } | { type: "aborted" };
+export type CallResult = { type: "done" } | { type: "failed"; error: string } | { type: "aborted" };
 
 /** Wait for one control call. The wait stops when `signal` aborts or the
  *  call takes more than {@link MCP_ACTION_TIMEOUT_MS}. */
-async function awaitCall(call: () => Promise<void>, signal: AbortSignal): Promise<CallResult> {
+export async function awaitCall(
+  call: () => Promise<void>,
+  signal: AbortSignal,
+): Promise<CallResult> {
   if (signal.aborted) return { type: "aborted" };
   try {
     const outcome = await raceTimeoutAndAbort(call(), MCP_ACTION_TIMEOUT_MS, signal);
