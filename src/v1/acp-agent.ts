@@ -356,6 +356,12 @@ import { formatUsageResponse, isUsageCommandText, parseUsageResponse } from "../
 import { parseMcpCommand, runMcpCommand } from "../mcp-command.js";
 import { configuredSettings, resolveThinkingConfig } from "../session-env.js";
 import {
+  CHROME_AVAILABLE_COMMAND,
+  CHROME_COMMAND_NAME,
+  parseChromeCommand,
+  runChromeCommand,
+} from "./chrome-command.js";
+import {
   MODE_CONFIG_ID,
   resolveInitialPermissionMode,
   SessionModeManager,
@@ -977,9 +983,13 @@ export type Session = {
    *  back yet. Claude Code stamps the echo with the same human origin as a
    *  message typed in another client, so the uuid is what tells the two apart. */
   sentUserUuids?: Set<string>;
-  /** The `/remote-control` command that is running, from its request to its
-   *  reply. Prompts wait for it, and a second command is refused meanwhile. */
-  remoteControlCommand?: Promise<void>;
+  /** The adapter command (`/remote-control` or `/chrome`) that is running,
+   *  from its request to its reply, with the thing it changes for the refusal
+   *  text. Prompts wait for it, and a second command is refused meanwhile. */
+  adapterCommand?: { subject: string; done: Promise<void> };
+  /** The `mcpServers` the query was created with. `/chrome` passes them along
+   *  with the Chrome server, because `setMcpServers` replaces the whole set. */
+  mcpServers?: Record<string, McpServerConfig>;
   /** The resolved SKILL.md paths of the skill commands, keyed by the cwd and
    *  the command name. A `commands_changed` clears it, because the skill
    *  files can have changed then. */
@@ -2490,16 +2500,15 @@ export class ClaudeAcpAgent {
       throw RequestError.internalError(undefined, SESSION_ENDED_MESSAGE);
     }
 
-    // Only a prompt that is the command awaits here: an await on every prompt
-    // would let other work run between its checks and its turn's enqueue.
-    const remoteControl = parseRemoteControlCommand(params.prompt)
-      ? await adapterRemoteControlCommand(
-          params.prompt,
-          session.query,
-          session.terminalSlashCommands,
-        )
-      : null;
-    if (remoteControl) {
+    const adapterCommand = this.adapterCommandFor(session, params);
+    if (
+      adapterCommand &&
+      !claudeCodeOffersCommand(
+        await session.query.supportedCommands(),
+        session.terminalSlashCommands,
+        adapterCommand.name,
+      )
+    ) {
       // The reply bypasses the turn queue, so it would land inside the output of
       // a turn that is still running. Refuse instead of interleaving.
       // `foregroundWork` also covers
@@ -2508,31 +2517,27 @@ export class ClaudeAcpAgent {
       if (this.claudeIsWorking(params.sessionId, session)) {
         throw RequestError.invalidRequest(
           undefined,
-          "Remote Control can't be changed while Claude is working. Try again when the turn ends.",
+          `${adapterCommand.subject} can't be changed while Claude is working. Try again when the turn ends.`,
         );
       }
-      if (session.remoteControlCommand) {
+      if (session.adapterCommand) {
         throw RequestError.invalidRequest(
           undefined,
-          "Remote Control is already being changed. Try again in a moment.",
+          `${session.adapterCommand.subject} is already being changed. Try again in a moment.`,
         );
       }
-      // Once Remote Control is on, other clients can start turns or send
-      // messages on their own. Something has to read the query stream for
-      // those to reach this client, and a command that answers without a turn
-      // would otherwise leave the stream unread until the next prompt.
-      this.ensureConsumer(session, params.sessionId);
-      // Answered by the adapter without a model turn.
+      // Answered by the adapter without a model turn; v2 clients treat an
+      // `ended` without a prior `inserted` as a refused prompt.
       events.inserted(randomUUID());
       // The request goes over the network. Until it and its reply are done,
-      // `remoteControlCommand` holds back the prompts that follow, which would
+      // `adapterCommand` holds back the prompts that follow, which would
       // otherwise start a turn that the reply lands in.
-      const command = this.runRemoteControlCommand(params.sessionId, remoteControl);
-      session.remoteControlCommand = command;
+      const done = adapterCommand.run();
+      session.adapterCommand = { subject: adapterCommand.subject, done };
       try {
-        await command;
+        await done;
       } finally {
-        session.remoteControlCommand = undefined;
+        session.adapterCommand = undefined;
       }
       events.ended({ stopReason: "end_turn" });
       return;
@@ -2579,11 +2584,11 @@ export class ClaudeAcpAgent {
       if (cleared) await this.publishPromptSuggestion(params.sessionId, cleared);
     }
 
-    // A `/remote-control` command still in flight answers into the session's
-    // output; wait for its reply before this prompt's turn can begin. Nothing
-    // below awaits before the turn is queued, so no command can start between.
-    // A failure of the command's reply is reported to the command's own prompt.
-    if (session.remoteControlCommand) await session.remoteControlCommand.catch(() => {});
+    // An adapter command still in flight answers into the session's output;
+    // wait for its reply before this prompt's turn can begin. Nothing below
+    // awaits before the turn is queued, so no command can start between. A
+    // failure of the command's reply is reported to the command's own prompt.
+    if (session.adapterCommand) await session.adapterCommand.done.catch(() => {});
 
     // A `session/close` during the awaits above tore the session down, and
     // its consumer is gone, so the prompt would never be inserted. End it
@@ -2642,7 +2647,51 @@ export class ClaudeAcpAgent {
     );
   }
 
-  /** Runs the command, and sends its reply (see `runRemoteControlCommand`). */
+  /** The adapter's own command that this prompt names, or null. The caller
+   *  runs it only while Claude Code offers no command of its name to an ACP
+   *  client (see `claudeCodeOffersCommand`). Synchronous, so a prompt that is
+   *  not a command reaches the turn queue without an extra await. */
+  private adapterCommandFor(
+    session: Session,
+    params: PromptRequest,
+  ): { name: string; subject: string; run: () => Promise<void> } | null {
+    const query = session.query;
+    const remoteControl = parseRemoteControlCommand(params.prompt);
+    if (remoteControl) {
+      if (!supportsRemoteControl(query)) return null;
+      return {
+        name: REMOTE_CONTROL_COMMAND_NAME,
+        subject: "Remote Control",
+        run: () => {
+          // Once Remote Control is on, other clients can start turns or send
+          // messages on their own. Something has to read the query stream for
+          // those to reach this client, and a command that answers without a
+          // turn would otherwise leave the stream unread until the next prompt.
+          this.ensureConsumer(session, params.sessionId);
+          return this.runRemoteControlCommand(params.sessionId, { query, command: remoteControl });
+        },
+      };
+    }
+    const chrome = parseChromeCommand(params.prompt);
+    if (!chrome) return null;
+    return {
+      name: CHROME_COMMAND_NAME,
+      subject: "Claude in Chrome",
+      run: async () => {
+        const text = await runChromeCommand(
+          query,
+          chrome,
+          session.mcpServers ?? {},
+          await claudeCliPath(),
+          (message) => this.logger.error(`Session ${params.sessionId}: ${message}`),
+        );
+        await this.client.sessionUpdate({
+          sessionId: params.sessionId,
+          update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text } },
+        });
+      },
+    };
+  }
   private async runRemoteControlCommand(
     sessionId: string,
     { query, command }: { query: RemoteControlQuery; command: RemoteControlCommand },
@@ -10507,6 +10556,7 @@ export class ClaudeAcpAgent {
         creationParams: params,
         settingsManager,
         effortSettingsOverride: configuredSettingsObject,
+        mcpServers: options.mcpServers,
         titles: new SessionTitles(this, sessionId),
         accumulatedUsage: {
           inputTokens: 0,
@@ -10990,6 +11040,7 @@ function errorKindData(
 ): { errorKind: AgentErrorKind } | undefined {
   return errorKind ? { errorKind } : undefined;
 }
+
 
 const MAX_TOOL_CALL_PARENTS = 1000;
 

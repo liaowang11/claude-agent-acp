@@ -493,6 +493,12 @@ const SESSION_COMMANDS: v2.AvailableCommand[] = [
     description: "Show the MCP servers and their status, or reconnect, enable, or disable a server",
     input: { type: "text", hint: "[reconnect|enable|disable [<server>|all]]" },
   },
+  {
+    type: "command",
+    name: "chrome",
+    description: "Connect Claude in Chrome to this session, or disconnect it",
+    input: { type: "text", hint: "[on|off]" },
+  },
 ];
 
 describe("ACP v2 sessions", () => {
