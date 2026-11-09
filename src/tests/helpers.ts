@@ -45,6 +45,10 @@ export function makeMockQuery(overrides: Record<string, unknown> = {}) {
     close: () => {},
     interrupt: async () => undefined,
     [Symbol.asyncIterator]: async function* () {},
+    // With no stream of the test's own, the stream stays open and yields
+    // nothing, like the real one between cycles: a consumer that reaches its
+    // end closes the session. A test's stream keeps its own `next`.
+    ...(Symbol.asyncIterator in overrides ? {} : { next: () => new Promise<never>(() => {}) }),
     ...overrides,
   };
 }

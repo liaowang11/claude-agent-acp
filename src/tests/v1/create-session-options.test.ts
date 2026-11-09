@@ -12,6 +12,8 @@ import type { AcpSessionNotification } from "../../acp-subagents.js";
 import { ALLOW_BYPASS } from "../../permissions/modes.js";
 import { NativeSubagentRuntime } from "../../native-subagents.js";
 import { startupFailure } from "../helpers.js";
+import { successfulResultMessage } from "./session-doubles.js";
+import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -25,6 +27,8 @@ let initModels: Record<string, unknown>[] | undefined;
 /** Holds the CLI initialization until the test resolves it. */
 let initGate: Promise<void> | undefined;
 let initError: Error | undefined;
+/** The query's stream; unset, it stays open and yields nothing. */
+let queryNext: (() => Promise<IteratorResult<unknown>>) | undefined;
 let setModelImpl: ((model: string) => Promise<void>) | undefined;
 let interruptImpl: (() => Promise<undefined>) | undefined;
 let closeSpy: ReturnType<typeof vi.fn<() => void>>;
@@ -58,6 +62,7 @@ vi.mock("@anthropic-ai/claude-agent-sdk", async () => {
         },
         mcpServerStatus: () => mcpServerStatusResult(),
         mcpAuthenticate: (serverName: string) => mcpAuthenticateImpl(serverName),
+        ...(queryNext ? { next: queryNext } : {}),
       });
     },
     getSessionMessages: vi.fn(() => sessionMessagesResult()),
@@ -108,6 +113,7 @@ describe("createSession options merging", () => {
     initModels = undefined;
     initGate = undefined;
     initError = undefined;
+    queryNext = undefined;
     setModelImpl = undefined;
     interruptImpl = undefined;
     closeSpy = vi.fn<() => void>();
@@ -1745,6 +1751,54 @@ describe("createSession options merging", () => {
 
       expect(capturedOptions!.disallowedTools).toContain("WebSearch");
       expect(capturedOptions!.disallowedTools).not.toContain("AskUserQuestion");
+    });
+  });
+
+  describe("messages before the first prompt", () => {
+    it("forwards a cycle that a peer message starts before any prompt", async () => {
+      // Another Claude Code session messages this one right after session/new.
+      // The CLI runs a cycle for it without any prompt from the client.
+      const cycle: unknown[] = [
+        { type: "system", subtype: "session_state_changed", state: "running" },
+        {
+          type: "assistant",
+          parent_tool_use_id: null,
+          uuid: randomUUID(),
+          session_id: "test-session",
+          message: {
+            role: "assistant",
+            model: "claude-sonnet-4-6",
+            stop_reason: "end_turn",
+            usage: { input_tokens: 1, output_tokens: 1 },
+            content: [{ type: "text", text: "reply to the peer" }],
+          },
+        },
+        successfulResultMessage({ origin: { kind: "peer", from: "other-session" } }),
+        { type: "system", subtype: "session_state_changed", state: "idle" },
+      ];
+      queryNext = async () =>
+        cycle.length > 0 ? { done: false, value: cycle.shift() } : new Promise<never>(() => {});
+      const updates: SessionNotification[] = [];
+      agent = new ClaudeAcpAgent({
+        ...createMockClient(),
+        sessionUpdate: async (notification: SessionNotification) => {
+          updates.push(notification);
+        },
+      } as AcpClient);
+
+      const { sessionId } = await agent.newSession({ cwd: process.cwd(), mcpServers: [] });
+
+      await vi.waitFor(() =>
+        expect(updates).toContainEqual(
+          expect.objectContaining({
+            sessionId,
+            update: expect.objectContaining({
+              sessionUpdate: "agent_message_chunk",
+              content: expect.objectContaining({ text: "reply to the peer" }),
+            }),
+          }),
+        ),
+      );
     });
   });
 

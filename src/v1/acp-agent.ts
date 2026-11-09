@@ -1015,9 +1015,9 @@ export type Session = {
    *  needing authentication. `system`/init re-emits on every turn with the
    *  same statuses, and each server is reported once per session. */
   reportedMcpServers?: Set<string>;
-  /** The long-lived consumer task. Lazily started on the first `prompt()` and
-   *  kept alive for the session so between-turn/background messages are still
-   *  drained and forwarded. */
+  /** The long-lived consumer task. Started after the setup response (or by an
+   *  earlier prompt) and kept alive for the session so between-turn and
+   *  background messages are still drained and forwarded. */
   consumer?: Promise<void>;
   /** Set once the SDK query stream has terminated (it ran to `done` or threw a
    *  non-process error). The query iterator is not reusable afterward, so a
@@ -1114,7 +1114,7 @@ export type Session = {
    *  the SDK is wedged and `query.next()` never yields again (issue #680).
    *  Distinct from `abortController`: this only wakes the consumer; it does NOT
    *  touch the SDK query/subprocess. The consumer re-arms it after each fire.
-   *  Undefined until the consumer is started by the first prompt. */
+   *  Undefined until the consumer starts (see `ensureConsumer`). */
   cancelController?: AbortController;
   /** Pending grace-period timer that aborts `cancelController`. Cleared when the
    *  active turn settles normally so the backstop never fires after a clean
@@ -2664,9 +2664,10 @@ export class ClaudeAcpAgent {
         subject: "Remote Control",
         run: () => {
           // Once Remote Control is on, other clients can start turns or send
-          // messages on their own. Something has to read the query stream for
-          // those to reach this client, and a command that answers without a
-          // turn would otherwise leave the stream unread until the next prompt.
+          // messages on their own, and those reach this client only while
+          // something reads the query stream. The setup response starts the
+          // reader (see `startReadingQuery`); this covers a command that comes
+          // before it.
           this.ensureConsumer(session, params.sessionId);
           return this.runRemoteControlCommand(params.sessionId, { query, command: remoteControl });
         },
@@ -3189,8 +3190,9 @@ export class ClaudeAcpAgent {
     }
   }
 
-  /** Lazily start the per-session consumer that drains the SDK query stream for
-   *  the session's whole life. Idempotent: only the first `prompt()` starts it. */
+  /** Start the per-session consumer that drains the SDK query stream for the
+   *  session's whole life. Idempotent: the setup response (see
+   *  `startReadingQuery`) or a prompt that comes first starts it. */
   private ensureConsumer(session: Session, sessionId: string): void {
     if (session.consumer) {
       return;
@@ -9355,9 +9357,10 @@ export class ClaudeAcpAgent {
   }
 
   /**
-   * The work that follows a session setup response: the session's commands,
-   * the current states of the subagents a load replayed, and MCP server
-   * authentication.
+   * The work that follows a session setup response: reading the query stream
+   * (see {@link startReadingQuery}), the session's commands, the current
+   * states of the subagents a load replayed, the messaging name and MCP
+   * server authentication.
    *
    * Call it in the same synchronous step as the handler's `return`: an
    * `await` between them would let the timer run before the response. The ACP
@@ -9372,11 +9375,25 @@ export class ClaudeAcpAgent {
    */
   private afterSetupResponse(sessionId: string, mcpServers: McpServer[]): void {
     setTimeout(() => {
+      this.startReadingQuery(sessionId);
       this.sendAvailableCommandsUpdate(sessionId);
       void this.publishCurrentSubagentStates(sessionId);
       void this.publishMessagingName(sessionId);
       startMcpAuthentication(this, sessionId, mcpServers);
     }, 0);
+  }
+
+  /**
+   * Starts reading the session's query stream once the client has the setup
+   * response. Claude Code runs cycles without a prompt, such as one for a
+   * message from another session, and their output reaches the client only
+   * while something reads the stream. Not earlier: a load replays history
+   * until the response, and v2 sends no update before it.
+   */
+  startReadingQuery(sessionId: string): void {
+    const session = this.sessions[sessionId];
+    if (!session || session.tornDown || session.queryClosed) return;
+    this.ensureConsumer(session, sessionId);
   }
 
   /**

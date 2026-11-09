@@ -4466,6 +4466,28 @@ describe("ACP v2 model cycles that Claude Code starts on its own", () => {
     return client;
   }
 
+  it("reports a cycle that a peer message starts before any prompt", async () => {
+    // Another Claude Code session messages this one right after session/new.
+    sdk.run = async function* (_prompts, options) {
+      yield assistantText(options, "Reply to the peer.");
+      yield result(options, { origin: { kind: "peer", from: "other-session" } });
+      yield idleState(options);
+      await new Promise<never>(() => {});
+    };
+    const client = v2Client();
+    await client.app.connectWith(connectRouter(), async (agent) => {
+      await initializeV2(agent);
+      await agent.request(v2.methods.agent.session.new, { cwd });
+      await vi.waitFor(() =>
+        expect(turnTrace(client.sessionUpdates)).toEqual([
+          "running",
+          "agent_message_chunk",
+          "idle end_turn",
+        ]),
+      );
+    });
+  });
+
   it("reports a cycle after the turn ended as running, then idle with the cycle's usage", async () => {
     scriptTurns(async function* (options) {
       yield assistantText(options, "Started the build in the background.");

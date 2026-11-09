@@ -308,10 +308,11 @@ describe("authorization", () => {
       message: `Authentication required: ${MESSAGE}`,
       data: { reason: REASON },
     };
-    /** The turn the mock query cannot run. `makeMockQuery` has no `next`, so a
-     *  turn that the guard let through dies in the consumer with this error.
-     *  Asserting it proves the guard passed instead of merely not refusing. */
-    const MOCK_QUERY_TURN_ERROR = "session.query.next is not a function";
+    /** The turn the mock query cannot run. `mockAccount`'s stream fails with
+     *  this error once a prompt reaches the SDK input, so a turn that the guard
+     *  let through dies in the consumer with it. Asserting it proves the guard
+     *  passed instead of merely not refusing. */
+    const MOCK_QUERY_TURN_ERROR = "the mock query cannot run a turn";
     const models = [
       { value: "id", displayName: "name", description: "description", supportsAutoMode: true },
     ];
@@ -323,12 +324,17 @@ describe("authorization", () => {
       account: Record<string, unknown>,
       overrides: Record<string, unknown> = {},
     ) {
-      mockQuery.mockImplementation(() =>
-        makeMockQuery({
+      mockQuery.mockImplementation(({ prompt }: { prompt: AsyncIterable<unknown> }) => {
+        const input = prompt[Symbol.asyncIterator]();
+        return makeMockQuery({
           initializationResult: async () => ({ models, account }),
+          next: async () => {
+            await input.next();
+            throw new Error(MOCK_QUERY_TURN_ERROR);
+          },
           ...overrides,
-        }),
-      );
+        });
+      });
     }
 
     function hideClaudeAuth() {
