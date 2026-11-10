@@ -8,8 +8,8 @@
  * echoes with `isReplay`, `command_lifecycle` frames, and
  * `session_state_changed`.
  */
-import { randomUUID } from "node:crypto";
-import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -856,8 +856,9 @@ describe("ACP v2 core", () => {
         description: "Review a change",
         input: { type: "text", hint: "<pull request>" },
       },
-      // The adapter's own `/mcp`.
+      // The adapter's own `/mcp` and `/chrome`.
       expect.objectContaining({ type: "command", name: "mcp" }),
+      expect.objectContaining({ type: "command", name: "chrome" }),
     ]);
     // Each prompt is echoed, and the session's state is reported.
     expect(claude.options.extraArgs).toMatchObject({ "replay-user-messages": "" });
@@ -1138,6 +1139,49 @@ describe("ACP v2 core", () => {
           sessionUpdate: "session_info_update",
           title: "Greet the user",
           updatedAt: "2026-10-02T00:00:00.000Z",
+        }),
+      );
+    });
+  });
+
+  it("publishes the CLI messaging name from its session record", async () => {
+    const client = v2Client();
+    await client.connect(async (agent) => {
+      await openSession(agent);
+      const cliSessionId = "cli-session-messaging";
+      const socketPath = "/tmp/claude-messaging.sock";
+      const sessions = path.join(tempDir, "claude", "sessions");
+      await mkdir(sessions, { recursive: true });
+      await writeFile(
+        path.join(sessions, "4242.json"),
+        JSON.stringify({
+          sessionId: cliSessionId,
+          name: "agent-shell-74",
+          nameSource: "derived",
+          messagingSocketPath: socketPath,
+        }),
+      );
+      sdk.processes.at(-1)!.send({
+        type: "system",
+        subtype: "init",
+        uuid: randomUUID(),
+        session_id: cliSessionId,
+        mcp_servers: [],
+      });
+      const ref = createHash("sha256").update(`session:${socketPath}`).digest("hex").slice(0, 6);
+      await vi.waitFor(() =>
+        expect(client.sessionUpdates).toContainEqual({
+          sessionUpdate: "session_info_update",
+          _meta: {
+            claudeCode: {
+              messagingName: {
+                address: `agent-shell-74 [${ref}]`,
+                name: "agent-shell-74",
+                nameSource: "derived",
+                socketPath,
+              },
+            },
+          },
         }),
       );
     });
