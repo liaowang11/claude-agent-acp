@@ -64,11 +64,11 @@ import {
   CanUseTool,
   FastModeDisabledReason,
   FastModeState,
-  filterEscalatingDefaultMode,
   getSessionInfo,
   getSessionMessages,
   HookCallback,
   listSessions,
+  McpServerConfig,
   ModelInfo,
   OnElicitation,
   OnUserDialog,
@@ -274,12 +274,14 @@ import {
   warnClaudeSubscriptionGuardDegraded,
 } from "../hide-claude-auth.js";
 import {
-  adapterRemoteControlCommand,
+  claudeCodeOffersCommand,
   isRemoteHumanMessage,
   parseRemoteControlCommand,
+  REMOTE_CONTROL_COMMAND_NAME,
   type RemoteControlCommand,
   type RemoteControlQuery,
   runRemoteControlCommand,
+  supportsRemoteControl,
 } from "../remote-control.js";
 import {
   AGENT_FILE_CHANGE_REPORT_CAPABILITY,
@@ -364,12 +366,7 @@ import { formatUsageResponse, isUsageCommandText, parseUsageResponse } from "../
 
 import { parseMcpCommand, runMcpCommand } from "../mcp-command.js";
 import { configuredSettings, resolveThinkingConfig } from "../session-env.js";
-import {
-  CHROME_AVAILABLE_COMMAND,
-  CHROME_COMMAND_NAME,
-  parseChromeCommand,
-  runChromeCommand,
-} from "./chrome-command.js";
+import { CHROME_COMMAND_NAME, parseChromeCommand, runChromeCommand } from "../chrome-command.js";
 import {
   MODE_CONFIG_ID,
   resolveInitialPermissionMode,
@@ -2746,6 +2743,8 @@ export class ClaudeAcpAgent {
       },
     };
   }
+
+  /** Runs the command, and sends its reply (see `runRemoteControlCommand`). */
   private async runRemoteControlCommand(
     sessionId: string,
     { query, command }: { query: RemoteControlQuery; command: RemoteControlCommand },
@@ -11366,7 +11365,6 @@ function errorKindData(
 ): { errorKind: AgentErrorKind } | undefined {
   return errorKind ? { errorKind } : undefined;
 }
-
 
 const MAX_TOOL_CALL_PARENTS = 1000;
 
