@@ -8,8 +8,8 @@
  * echoes with `isReplay`, `command_lifecycle` frames, and
  * `session_state_changed`.
  */
-import { randomUUID } from "node:crypto";
-import { mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from "vitest";
@@ -1830,6 +1830,49 @@ describe("ACP v2 core", () => {
           "sources that your administrator approved.",
       },
     ]);
+  });
+
+  it("publishes the CLI messaging name from its session record", async () => {
+    const client = v2Client();
+    await client.connect(async (agent) => {
+      await openSession(agent);
+      const cliSessionId = "cli-session-messaging";
+      const socketPath = "/tmp/claude-messaging.sock";
+      const sessions = path.join(tempDir, "claude", "sessions");
+      await mkdir(sessions, { recursive: true });
+      await writeFile(
+        path.join(sessions, "4242.json"),
+        JSON.stringify({
+          sessionId: cliSessionId,
+          name: "agent-shell-74",
+          nameSource: "derived",
+          messagingSocketPath: socketPath,
+        }),
+      );
+      sdk.processes.at(-1)!.send({
+        type: "system",
+        subtype: "init",
+        uuid: randomUUID(),
+        session_id: cliSessionId,
+        mcp_servers: [],
+      });
+      const ref = createHash("sha256").update(`session:${socketPath}`).digest("hex").slice(0, 6);
+      await vi.waitFor(() =>
+        expect(client.sessionUpdates).toContainEqual({
+          sessionUpdate: "session_info_update",
+          _meta: {
+            claudeCode: {
+              messagingName: {
+                address: `agent-shell-74 [${ref}]`,
+                name: "agent-shell-74",
+                nameSource: "derived",
+                socketPath,
+              },
+            },
+          },
+        }),
+      );
+    });
   });
 
   it("reports a client MCP server that failed to start as a notice, once", async () => {

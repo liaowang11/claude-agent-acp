@@ -64,7 +64,6 @@ import {
   CanUseTool,
   FastModeDisabledReason,
   FastModeState,
-  filterEscalatingDefaultMode,
   getSessionInfo,
   getSessionMessages,
   HookCallback,
