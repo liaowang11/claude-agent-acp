@@ -228,6 +228,38 @@ describe("/chrome", () => {
     expect(sessionUpdate).not.toHaveBeenCalled();
   });
 
+  it("refuses a steered /chrome instead of passing it to the running turn", async () => {
+    const query = chromeQuery("absent");
+    const push = vi.fn();
+    const { agent, sessionUpdate } = createAgent(query, {
+      turnQueue: [{ settled: false }],
+      input: { push },
+    });
+
+    await expect(agent.steer(prompt("/chrome on"))).rejects.toThrow(/while Claude is working/);
+
+    expect(push).not.toHaveBeenCalled();
+    expect(query.setMcpServers).not.toHaveBeenCalled();
+    expect(sessionUpdate).not.toHaveBeenCalled();
+  });
+
+  it("steers /chrome into the running turn when Claude Code offers it", async () => {
+    const query = chromeQuery("absent");
+    const push = vi.fn();
+    const { agent } = createAgent(
+      {
+        ...query,
+        supportedCommands: async () => [{ name: "chrome", description: "", argumentHint: "" }],
+      },
+      { turnQueue: [{ settled: false }], input: { push } },
+    );
+
+    await expect(agent.steer(prompt("/chrome on"))).resolves.toEqual({ outcome: "injected" });
+
+    expect(push).toHaveBeenCalledOnce();
+    expect(query.setMcpServers).not.toHaveBeenCalled();
+  });
+
   it("leaves /chrome to Claude Code when Claude Code offers it", async () => {
     const query = chromeQuery("absent");
     const push = vi.fn();

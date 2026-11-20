@@ -1575,6 +1575,14 @@ function stripSubagentTextAndThinking(content: unknown): unknown {
  *  revivable, so the only recovery is a fresh session. */
 const SESSION_ENDED_MESSAGE = "The Claude Agent session has ended. Please start a new session.";
 
+/** An adapter command answers outside the turn queue, so it waits for the turn. */
+function adapterCommandBusyError(subject: string): RequestError {
+  return RequestError.invalidRequest(
+    undefined,
+    `${subject} can't be changed while Claude is working. Try again when the turn ends.`,
+  );
+}
+
 /**
  * True for a user record that the CLI wrote to tell the model that a
  * background task stopped. A `subkind` marks the delivery of a prompt, for
@@ -2564,10 +2572,7 @@ export class ClaudeAcpAgent {
       // a cycle that Claude Code started on its own, such as its follow-up
       // after a background subagent finished, which is not in `turnQueue`.
       if (this.claudeIsWorking(params.sessionId, session)) {
-        throw RequestError.invalidRequest(
-          undefined,
-          `${adapterCommand.subject} can't be changed while Claude is working. Try again when the turn ends.`,
-        );
+        throw adapterCommandBusyError(adapterCommand.subject);
       }
       if (session.adapterCommand) {
         throw RequestError.invalidRequest(
@@ -3175,6 +3180,22 @@ export class ClaudeAcpAgent {
       sessionId,
       prompt: params.prompt,
     };
+    // An adapter command steered into a running turn would reach Claude Code
+    // as plain text, which answers "/chrome isn't available in this
+    // environment". Refuse it the way `prompt()` does while Claude is working.
+    // Only a command awaits here, so other steers keep the in-flight check and
+    // the push below in one synchronous section. After the await the turn may
+    // have ended, so start over; otherwise the section resumes from here.
+    const adapterCommand = this.adapterCommandFor(session, promptRequest);
+    if (adapterCommand) {
+      const offered = claudeCodeOffersCommand(
+        await session.query.supportedCommands(),
+        session.terminalSlashCommands,
+        adapterCommand.name,
+      );
+      if (turnInFlight.settled) return this.steer(params);
+      if (!offered) throw adapterCommandBusyError(adapterCommand.subject);
+    }
     const userMessage = promptToClaude(promptRequest);
     const steeredUuid = randomUUID();
     userMessage.uuid = steeredUuid;
